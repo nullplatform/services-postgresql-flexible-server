@@ -58,7 +58,7 @@ Exposed in the nullplatform UI when creating/updating the service:
 | Parameter | Type | Default | Allowed Values | Editable After Create |
 |---|---|---|---|---|
 | `database_name` | string | — (required) | `^[a-z][a-z0-9_]{0,62}$` | No |
-| `postgres_version` | string | `17` | `16`, `17` | No |
+| `postgres_version` | string | `16` | `16`, `17` | No. 17 on a Burstable SKU fails in some regions (eastus2); use a GP SKU with 17 |
 | `sku_name` | string | `B_Standard_B1ms` | `B_Standard_B1ms`, `B_Standard_B2s`, `B_Standard_B2ms`, `GP_Standard_D2s_v3`, `GP_Standard_D4s_v3` | Yes |
 | `storage_mb` | number | `32768` | 32768, 65536, 131072, 262144, 524288 | Yes (grow only) |
 | `backup_retention_days` | number | `7` | 7–35 | Yes |

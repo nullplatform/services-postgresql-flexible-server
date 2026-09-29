@@ -80,7 +80,7 @@ TFVARS=$(get "$ENV_OUT" TOFU_VARIABLES)
 assert_eq "ok" "$(printf '%s' "$TFVARS" | jq -e . >/dev/null 2>&1 && echo ok || echo bad)" "TOFU_VARIABLES is valid JSON"
 assert_eq "conciliation-db-9f8e7d6c" "$(printf '%s' "$TFVARS" | jq -r '.server_name')" "tfvars server_name"
 assert_eq "conciliation" "$(printf '%s' "$TFVARS" | jq -r '.database_name')" "tfvars database_name"
-assert_eq "17" "$(printf '%s' "$TFVARS" | jq -r '.postgres_version')" "postgres_version is a string, as azurerm expects"
+assert_eq "17" "$(printf '%s' "$TFVARS" | jq -r '.postgres_version')" "postgres_version from parameters is a string, as azurerm expects"
 assert_eq "string" "$(printf '%s' "$TFVARS" | jq -r '.postgres_version | type')" "postgres_version typed as string"
 assert_eq "14" "$(printf '%s' "$TFVARS" | jq -r '.backup_retention_days')" "parameters override defaults"
 assert_eq "number" "$(printf '%s' "$TFVARS" | jq -r '.storage_mb | type')" "storage_mb typed as number"
