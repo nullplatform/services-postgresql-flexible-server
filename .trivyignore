@@ -1,2 +1,23 @@
-# AVD-DS-0002: the worker-bridge base runs as root; the runtime user is set by the agent's worker pod.
+# Trivy misconfiguration suppressions for this repo (intentional, documented).
+
+# AVD-DS-0002: the worker-bridge base runs as root; the runtime user is set by
+# the agent's worker pod securityContext, not by a USER directive here.
 AVD-DS-0002
+
+# AVD-AZU-0019 / AVD-AZU-0020 (PostgreSQL log_checkpoints / log_connections):
+# server parameters tuned for auditing are a v2 concern; the platform's own
+# logging integration is the intended path.
+AVD-AZU-0019
+AVD-AZU-0020
+
+# AVD-AZU-0021 (connection_throttling): same as above.
+AVD-AZU-0021
+
+# AVD-AZU-0017 / public network access: the server is created with a public
+# endpoint on purpose, reachable only from the addresses in allowed_ips
+# (the cluster's egress IP). Private access needs a VNet-delegated subnet the
+# caller's network layer has to own, which is out of scope for this version.
+# TLS is enforced (require_secure_transport = on). See "The server is
+# reachable from the public internet" in the README.
+AVD-AZU-0017
+AVD-AZU-0018

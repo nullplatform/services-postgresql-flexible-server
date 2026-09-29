@@ -22,7 +22,7 @@ jobs:
     if: ${{ !github.event.repository.is_template && github.event.pull_request.head.repo.full_name == github.repository }}
     uses: nullplatform/actions-nullplatform/.github/workflows/docker-build-push-ecr.yml@v1
     with:
-      image_name: agent-plugins/services/my-service
+      image_name: agent-plugins/services/postgresql-flexible-server
       context: .
       tag: pr-${{ github.event.pull_request.number }}
     secrets:

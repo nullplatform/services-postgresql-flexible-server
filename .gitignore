@@ -1,6 +1,14 @@
 .terraform/
+.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
-*.tfplan
-.env
+terraform.tfvars
+terraform.tfvars.json
+crash.log
 .DS_Store
+output/
+/tmp-test/
+
+# Artefactos de la skill de superpowers: planes y specs del proceso de
+# construcción, no documentación del repo.
+docs/superpowers/

@@ -1,0 +1,97 @@
+# Namespace-level NRN, e.g. organization=<org>:account=<account>:namespace=<namespace>
+nrn        = ""
+np_api_key = ""
+
+# Ref of nullplatform/tofu-modules to source service_definition and
+# service_definition_agent_association from. No default is baked in here on
+# purpose — confirm the current ref before applying, do not copy this from
+# another service's install. As of this writing (2026-09-04) the tags on
+# https://github.com/nullplatform/tofu-modules range up to v7.3.0 (which is
+# also what `main` currently points at), with v6.x tags before it; there are
+# also a handful of unreleased fix/feat branches. Re-check before applying:
+#   git ls-remote --tags https://github.com/nullplatform/tofu-modules
+tofu_modules_ref = ""
+
+repository_org  = "" # your GitHub org or user
+repository_name = "services-postgresql-flexible-server"
+
+# Pinned ref of THIS repository (services-postgresql-flexible-server), NOT of
+# tofu-modules. Required as our own policy — pin an immutable ref, don't
+# track a moving branch — not because every tofu_modules_ref enforces it:
+# at tofu-modules v7.2.0+ the service_definition module itself also
+# validates this and rejects "main"/"master"/"head"/"latest"; at v7.1.0 and
+# earlier it does not (repository_branch there just defaults to "main").
+# Don't rely on the module to catch this if you pin an older ref. Pick one:
+#   - a git tag on this repo (repository_ref_type = "tags", the default) —
+#     cut one before using remote/production mode, e.g. "v1.0.0";
+#   - a real branch name other than main (repository_ref_type = "heads");
+#   - a raw commit SHA (repository_ref_type = "").
+# While iterating with git_provider = "local" below, this value is still
+# validated (at v7.2.0+) but never fetched, so any compliant placeholder
+# works, e.g.:
+# repository_branch = "local-iteration"
+repository_branch = ""
+
+# Where the agent looks for cloned repos (builds the agent's exec cmdline).
+# Required, no default — getting this wrong is a SILENT failure: the channel
+# registers fine and the notification fails at the agent with something like
+# "command not found in any allowed paths". The right value depends on the
+# deployed AGENT image, not on tofu_modules_ref, and the two nullplatform
+# reference points disagree depending on which tofu-modules ref you look at
+# (its own convenience default is "/root/.np" at v7.1.0 and earlier, a
+# root-user agent image, and "/home/agent/.np" from v7.2.0 onward, a
+# non-root "agent"-user image) — confirm the ACTUAL $HOME of the agent
+# pod/process that will run this service rather than copying either value,
+# e.g.: `kubectl exec <agent-pod> -- env | grep HOME`
+#
+# Only required in the GIT-CLONE model (package_version unset below). In the
+# packaged model the module builds no clone path at all and this is ignored.
+base_clone_path = ""
+
+# Must match the agent's -tags flag exactly.
+tags_selectors = {
+  "environment" = "development"
+}
+
+# --- Local iteration (recommended while developing) -------------------------
+# git_provider     = "local"
+# local_specs_path = "/absolute/path/to/services-postgresql-flexible-server/postgresql-flexible-server"
+# For a local (host-runtime) agent, base_clone_path above is normally
+# "~/.np" — .tfvars can't call pathexpand(), so either write the expanded
+# absolute path here, or edit main.tf to wrap it: pathexpand(var.base_clone_path).
+
+# --- Remote (production) ----------------------------------------------------
+# repository_token is only needed for a private repository; this one is public.
+# repository_ref_type = "tags"
+# repository_token    = ""
+
+# --- Packaged deployment (OCI worker image) ---------------------------------
+# Leave package_version unset (commented out) to keep the classic git-clone
+# model. Setting it switches this install to the packaged model: the agent
+# pulls the worker image instead of cloning this repository, and tofu comes
+# baked in rather than being downloaded at action time.
+#
+# Requires tofu_modules_ref >= v7.2.0.
+#
+# The three image_* values come from the GitHub release that the release
+# workflow finalized — it appends an "Artifact" table with the exact image,
+# digest and pinned reference. Do not read the digest from a local
+# `docker inspect`: the published multi-arch index digest is what the agent
+# pulls.
+#
+# FIRST APPLY IS TWO STEPS. This service's spec uses default actions, which
+# the platform creates server-side. On the apply that CREATES the spec they
+# have no snapshot id yet and cannot be pinned into the bill of materials.
+# Apply once to create the specs, then apply again to publish a complete
+# package revision.
+#
+# package_version  = "0.0.1"                       # the PACKAGE's own semver, not the git tag
+# image_registry   = "acmecorpacr.azurecr.io"      # host only, no path
+# image_repository = "agent-plugins/services/postgresql-flexible-server" # must match IMAGE_NAME in the release workflow
+# image_digest     = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+#
+# Optional:
+# package_slug       = null    # null = the service specification's own slug (recommended)
+# package_default    = true    # promote each published revision to the package default
+# package_visible_to = null    # null = [nrn]
+# worker_entrypoint  = "/app/pkg/postgresql-flexible-server/entrypoint/entrypoint"  # must match the Dockerfile

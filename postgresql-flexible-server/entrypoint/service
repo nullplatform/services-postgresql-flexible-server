@@ -1,0 +1,36 @@
+#!/bin/bash
+set -euo pipefail
+
+echo "Executing service action=$SERVICE_ACTION type=$SERVICE_ACTION_TYPE"
+
+ACTION_TO_EXECUTE="$SERVICE_ACTION_TYPE"
+
+case "$SERVICE_ACTION_TYPE" in
+  "custom")
+    ACTION_TO_EXECUTE="$SERVICE_ACTION"
+    ;;
+esac
+
+# The action name becomes a path segment. Reject anything that is not a plain
+# identifier so a crafted action slug cannot escape workflows/azure/.
+if [[ ! "$ACTION_TO_EXECUTE" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+  echo "ERROR: invalid action '$ACTION_TO_EXECUTE' (must match ^[a-zA-Z0-9_-]+\$)" >&2
+  exit 1
+fi
+
+WORKFLOW_PATH="$SERVICE_PATH/workflows/azure/$ACTION_TO_EXECUTE.yaml"
+OVERRIDES_WORKFLOW_PATH="$OVERRIDES_PATH/workflows/azure/$ACTION_TO_EXECUTE.yaml"
+VALUES_PATH="$SERVICE_PATH/values.yaml"
+
+CMD_ARGS=(np service workflow exec --workflow "$WORKFLOW_PATH")
+
+if [[ -f "$VALUES_PATH" ]]; then
+  CMD_ARGS+=(--values "$VALUES_PATH")
+fi
+
+if [[ -f "$OVERRIDES_WORKFLOW_PATH" ]]; then
+  CMD_ARGS+=(--overrides "$OVERRIDES_WORKFLOW_PATH")
+fi
+
+echo "Executing command: ${CMD_ARGS[*]}"
+"${CMD_ARGS[@]}"

@@ -1,0 +1,12 @@
+#!/bin/bash
+# Test stub. Appends its argv to $NP_STUB_LOG and echoes canned JSON.
+set -euo pipefail
+printf '%s\n' "np $*" >> "${NP_STUB_LOG:?NP_STUB_LOG must be set}"
+
+case "${1:-}" in
+  provider)
+    cat "${NP_STUB_PROVIDER_JSON:-/dev/null}" 2>/dev/null || echo '{"results":[]}'
+    ;;
+  *)
+    ;;
+esac

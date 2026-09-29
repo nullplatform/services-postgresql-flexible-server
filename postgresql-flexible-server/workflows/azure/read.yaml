@@ -1,0 +1,47 @@
+# Reports what the platform believes the current state to be, as action results.
+#
+# Touches nothing in Azure and needs no credential step: build_context only
+# derives names and paths from the notification payload, and this workflow
+# never runs tofu. The values reported are what nullplatform already holds in
+# the service attributes, not a live read of the server.
+steps:
+  - name: build context
+    type: script
+    file: $SERVICE_PATH/scripts/azure/build_context
+    output:
+      - name: SERVER_NAME
+        type: environment
+      - name: DATABASE_NAME
+        type: environment
+      - name: RESOURCE_GROUP_NAME
+        type: environment
+      - name: LOCATION
+        type: environment
+
+  - name: read current state
+    type: script
+    script: |
+      #!/bin/bash
+      set -euo pipefail
+
+      HOSTNAME_ATTR=$(echo "$CONTEXT" | jq -r '.service.attributes.hostname // ""')
+      PORT_ATTR=$(echo "$CONTEXT" | jq -r '.service.attributes.port // ""')
+
+      RESULTS=$(jq -nc \
+        --arg server_name         "${SERVER_NAME:-}" \
+        --arg hostname            "${HOSTNAME_ATTR}" \
+        --arg port                "${PORT_ATTR}" \
+        --arg database_name       "${DATABASE_NAME:-}" \
+        --arg resource_group_name "${RESOURCE_GROUP_NAME:-}" \
+        --arg location            "${LOCATION:-}" \
+        '{
+          server_name:         $server_name,
+          hostname:            $hostname,
+          port:                $port,
+          database_name:       $database_name,
+          resource_group_name: $resource_group_name,
+          location:            $location
+        }')
+
+      echo "Reporting current state: $RESULTS"
+      np service action update --results "$RESULTS"
