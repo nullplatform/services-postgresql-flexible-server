@@ -1,18 +1,7 @@
 # syntax=docker/dockerfile:1
-#
-# postgresql-flexible-server service worker image.
-#
-# The nullplatform worker bridge dials over gRPC and runs the baked bash
-# entrypoint on each package-exec action. This image adds the one tool the
-# Azure workflows need that the lean base does not carry — OpenTofu — and
-# bakes the service in, so the notification channel needs no cmdline of its own.
-#
-# Deliberately NO azure-cli and NO psql. The service resolves its identity
-# from the nullplatform cloud-providers provider and lets the azurerm provider
-# authenticate from ARM_*; roles and grants are managed by the
-# cyrilgdn/postgresql Terraform provider over TLS. Nothing under scripts/azure/
-# shells out to a database or cloud CLI. bash, jq, np and curl ship in the base.
-FROM public.ecr.aws/nullplatform/scopes/worker-bridge:1.1.1
+
+# Worker image: the bridge runs the entrypoint on every action. Add the tools your steps need.
+FROM public.ecr.aws/nullplatform/scopes/worker-bridge:2.0.0
 
 # OpenTofu, pinned. Baking it here is the whole point of the OCI model: on the
 # git-clone path do_tofu curls a release tarball into /tmp on every action,
