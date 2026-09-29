@@ -89,7 +89,7 @@ if [[ ! "$SERVER_NAME" =~ ^[a-z0-9]([a-z0-9-]{1,61}[a-z0-9])?$ ]] || [ "${#SERVE
 fi
 
 DATABASE_NAME=$(echo "$SERVICE_ATTRS"         | jq -r '.database_name          // ""')
-POSTGRES_VERSION=$(echo "$SERVICE_ATTRS"      | jq -r '.postgres_version       // "17"')
+POSTGRES_VERSION=$(echo "$SERVICE_ATTRS"      | jq -r '.postgres_version       // "16"')
 SKU_NAME=$(echo "$SERVICE_ATTRS"              | jq -r '.sku_name               // "B_Standard_B1ms"')
 STORAGE_MB=$(echo "$SERVICE_ATTRS"            | jq -r '.storage_mb             // 32768')
 BACKUP_RETENTION_DAYS=$(echo "$SERVICE_ATTRS" | jq -r '.backup_retention_days  // 7')

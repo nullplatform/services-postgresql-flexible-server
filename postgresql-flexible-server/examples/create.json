@@ -6,8 +6,8 @@
   "notification": {
     "action": "service:action:create",
     "id": "aaaaaaaa-1111-2222-3333-444444444444",
-    "name": "create-postgresql-flexible-server",
-    "slug": "create-postgresql-flexible-server",
+    "name": "create-azure-postgresql-flexible-server",
+    "slug": "create-azure-postgresql-flexible-server",
     "status": "pending",
     "type": "create",
     "parameters": {
@@ -21,7 +21,7 @@
     "results": {},
     "specification": {
       "id": "bbbbbbbb-1111-2222-3333-444444444444",
-      "slug": "create-postgresql-flexible-server"
+      "slug": "create-azure-postgresql-flexible-server"
     },
     "service": {
       "id": "9f8e7d6c-1234-4321-abcd-000000000000",
@@ -31,7 +31,7 @@
       "attributes": {},
       "specification": {
         "id": "cccccccc-1111-2222-3333-444444444444",
-        "slug": "postgresql-flexible-server"
+        "slug": "azure-postgresql-flexible-server"
       },
       "dimensions": {
         "environment": "development"

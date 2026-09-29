@@ -54,7 +54,7 @@ variable "database_name" {
 
 variable "postgres_version" {
   type        = string
-  default     = "17"
+  default     = "16"
   description = "PostgreSQL major version"
 
   validation {

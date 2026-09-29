@@ -1,6 +1,6 @@
 {
   "name": "Azure PostgreSQL Flexible Server",
-  "slug": "postgresql-flexible-server",
+  "slug": "azure-postgresql-flexible-server",
   "type": "dependency",
   "unique": false,
   "assignable_to": "any",
@@ -90,9 +90,9 @@
         "postgres_version": {
           "type": "string",
           "title": "PostgreSQL Version",
-          "default": "17",
+          "default": "16",
           "enum": ["16", "17"],
-          "description": "Major version. Cannot be changed after creation: an in-place major upgrade is an Azure operation outside this service.",
+          "description": "Major version. Cannot be changed after creation: an in-place major upgrade is an Azure operation outside this service. 17 on a Burstable (B_) SKU fails with an Azure InternalServerError in some regions (seen in eastus2); pair 17 with a General Purpose SKU.",
           "editableOn": ["create"],
           "order": 2
         },
