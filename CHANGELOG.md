@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.0.1](https://github.com/nullplatform/services-postgresql-flexible-server/compare/v1.0.0...v1.0.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* align the package slug with the one the API derives from the name ([acc43ec](https://github.com/nullplatform/services-postgresql-flexible-server/commit/acc43eca10bebc7986b259c033e9622fb0fde7d8))
+* default postgres_version to 16 ([230a34f](https://github.com/nullplatform/services-postgresql-flexible-server/commit/230a34f288a37556575abcea9223601f065d3cc2))
+* package slug and postgres_version default ([1eebe1e](https://github.com/nullplatform/services-postgresql-flexible-server/commit/1eebe1e2e1e623b0bbbff9e743299f84c736e76a))
+
 ## 1.0.0 (2026-09-29)
 
 
