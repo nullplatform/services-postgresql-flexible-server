@@ -1,0 +1,2 @@
+# AVD-DS-0002: the worker-bridge base runs as root; the runtime user is set by the agent's worker pod.
+AVD-DS-0002

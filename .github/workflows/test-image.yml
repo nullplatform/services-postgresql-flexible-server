@@ -1,0 +1,29 @@
+name: test-image
+
+# Every same-repo pull request publishes its own tag, pr-<number>, overwritten on each push.
+# Pull requests never touch latest or the vX.Y.Z tags: only the release moves them, so
+# closing or abandoning a pull request leaves nothing to revert.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# A newer push to the same pull request supersedes the running build.
+concurrency:
+  group: test-image-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  test-image:
+    # Fork code must not run with push credentials, and the template repository never publishes.
+    if: ${{ !github.event.repository.is_template && github.event.pull_request.head.repo.full_name == github.repository }}
+    uses: nullplatform/actions-nullplatform/.github/workflows/docker-build-push-ecr.yml@v1
+    with:
+      image_name: agent-plugins/services/my-service
+      context: .
+      tag: pr-${{ github.event.pull_request.number }}
+    secrets:
+      aws_role_arn: ${{ secrets.AWS_ROLE_ARN_ECR_PUSH }}
