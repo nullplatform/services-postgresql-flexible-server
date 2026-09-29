@@ -1,8 +1,19 @@
 # Only what the agent runs goes into the image.
 .git
+.gitignore
 .github
+.trivyignore
 Dockerfile
+mise.toml
 *.md
+**/*.md
 **/.terraform
 **/*.tfstate*
-mise.toml
+
+# Developer-only. examples/stub-bin/ ships fake `az`, `np` and `tofu`
+# executables for the offline unit tests — they must never travel in an image
+# that runs real actions, even unreachable from PATH.
+**/examples/
+
+# Operator-side terraform (registers the service; never runs on the agent).
+**/specs/install/

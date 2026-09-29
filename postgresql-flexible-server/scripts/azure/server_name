@@ -1,0 +1,65 @@
+#!/bin/bash
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# server_name — Derives a valid Azure Flexible Server name.
+#
+# Azure's constraint: 3-63 characters, lowercase letters, digits and hyphens,
+# no leading or trailing hyphen, globally unique (the name becomes the
+# <name>.postgres.database.azure.com hostname).
+#
+# Usage: server_name <raw_name> <service_id>
+#
+# The service-id suffix is always preserved: when the name is too long the
+# BASE is truncated, never the suffix, so uniqueness survives truncation.
+# ---------------------------------------------------------------------------
+
+RAW_NAME="${1:-}"
+SERVICE_ID="${2:-}"
+
+if [ -z "$SERVICE_ID" ]; then
+  echo "ERROR: server_name requires <raw_name> <service_id>" >&2
+  exit 1
+fi
+
+MAX_LEN=63
+FALLBACK_BASE="nppg"
+
+# Lowercase, anything that is not [a-z0-9] becomes a hyphen, hyphen runs
+# collapse to one, leading and trailing hyphens go.
+sanitize() {
+  printf '%s' "$1" \
+    | tr '[:upper:]' '[:lower:]' \
+    | tr -c 'a-z0-9\n' '-' \
+    | tr -s '-' \
+    | sed 's/^-//; s/-$//'
+}
+
+SUFFIX=$(printf '%s' "$SERVICE_ID" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9' | cut -c1-8)
+
+if [ -z "$SUFFIX" ]; then
+  echo "ERROR: service_id '${SERVICE_ID}' contains no alphanumeric characters" >&2
+  exit 1
+fi
+
+BASE=$(sanitize "$RAW_NAME")
+
+# .service.name may be absent or sanitize to nothing — the fallback keeps the
+# name from being just the suffix.
+if [ -z "$BASE" ]; then
+  BASE="$FALLBACK_BASE"
+fi
+
+# Room for the base: total minus the suffix minus the joining hyphen.
+AVAILABLE=$((MAX_LEN - ${#SUFFIX} - 1))
+BASE=$(printf '%s' "$BASE" | cut -c1-"$AVAILABLE" | sed 's/-$//')
+
+NAME="${BASE}-${SUFFIX}"
+
+if [[ ! "$NAME" =~ ^[a-z0-9]([a-z0-9-]{1,61}[a-z0-9])?$ ]] || [ "${#NAME}" -lt 3 ]; then
+  echo "ERROR: computed server name '${NAME}' is not a valid Azure Flexible Server name" >&2
+  echo "       (required: 3-63 lowercase letters, digits and hyphens, no leading or trailing hyphen)" >&2
+  exit 1
+fi
+
+printf '%s\n' "$NAME"

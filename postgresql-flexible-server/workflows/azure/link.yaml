@@ -1,0 +1,92 @@
+# Creates the link's PostgreSQL role with grants for its access level, then
+# writes the username, password and JDBC URL to the link attributes.
+#
+# The role is created from inside the worker pod, over TLS, so the server's
+# firewall must allow the cluster's egress IP (see allowed_ips).
+provider_categories:
+  - cloud-providers
+
+steps:
+  - name: resolve azure credentials
+    type: script
+    file: $SERVICE_PATH/scripts/azure/resolve_azure_credentials
+    output:
+      - name: ARM_SUBSCRIPTION_ID
+        type: environment
+      - name: ARM_CLIENT_ID
+        type: environment
+      - name: ARM_TENANT_ID
+        type: environment
+      # Empty when the agent uses a managed identity. Needed here too: the
+      # permissions module reads the deployment state through the azurerm
+      # backend, which authenticates with the same ARM_* environment.
+      - name: ARM_CLIENT_SECRET
+        type: environment
+
+  - name: build context
+    type: script
+    file: $SERVICE_PATH/scripts/azure/build_context
+    output:
+      - name: OUTPUT_DIR
+        type: environment
+      - name: TOFU_MODULE_DIR
+        type: environment
+      - name: TOFU_INIT_VARIABLES
+        type: environment
+      - name: TOFU_VARIABLES
+        type: environment
+      - name: TFSTATE_CONTAINER
+        type: environment
+      - name: TFSTATE_STORAGE_ACCOUNT
+        type: environment
+      - name: TFSTATE_RESOURCE_GROUP
+        type: environment
+      - name: TFSTATE_KEY
+        type: environment
+      - name: LINK_ID
+        type: environment
+      - name: LINK_NAME
+        type: environment
+      - name: SCOPE_ID
+        type: environment
+      - name: SCOPE_NRN
+        type: environment
+      - name: SCOPE_SLUG
+        type: environment
+      - name: APP_SLUG
+        type: environment
+      - name: APP_NRN
+        type: environment
+      - name: LINK_ACCESS_LEVEL
+        type: environment
+      - name: LINK_USERNAME
+        type: environment
+
+  - name: build permissions context
+    type: script
+    file: $SERVICE_PATH/scripts/azure/build_permissions_context
+    output:
+      - name: OUTPUT_DIR
+        type: environment
+      - name: TOFU_MODULE_DIR
+        type: environment
+      - name: TOFU_INIT_VARIABLES
+        type: environment
+      - name: TOFU_VARIABLES
+        type: environment
+      # Set only on the unlink-with-no-server early exit, so do_tofu and
+      # write_link_outputs can no-op instead of inheriting a stale
+      # deployment/ TOFU_MODULE_DIR from build_context. Must be declared here
+      # or the engine never propagates it to the following steps.
+      - name: NP_SKIP_TOFU
+        type: environment
+
+  - name: tofu
+    type: script
+    file: $SERVICE_PATH/scripts/azure/do_tofu
+    configuration:
+      TOFU_ACTION: apply
+
+  - name: write link outputs
+    type: script
+    file: $SERVICE_PATH/scripts/azure/write_link_outputs

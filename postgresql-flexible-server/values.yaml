@@ -1,0 +1,70 @@
+# Azure PostgreSQL Flexible Server Service — Static Configuration
+#
+# These values are NOT exposed in the nullplatform UI.
+#
+# EVERY KEY HERE IS OPTIONAL, and on a stock nullplatform Azure agent this file
+# can stay exactly as shipped — empty. It is the highest-precedence tier of a
+# three-tier resolution, meant for overriding, not for configuring:
+#
+#   1. values.yaml (this file)   explicit, service-scoped, committed
+#   2. cloud-providers provider  the platform's own configuration for this
+#                                NRN + dimensions
+#   3. agent environment         what tofu-modules' nullplatform/agent already
+#                                injects into the agent pod
+#
+# It outranks the other two on purpose: the agent inherits every variable from
+# the process that launched it, so an ambient value could otherwise silently
+# point this service at the wrong subscription. Setting a key here pins it.
+#
+# NOTE: In scripts, $VALUES is a FILE PATH (set by
+#       "np service workflow exec --values <path>"). It is NOT JSON content.
+#       Read values with yaml_value(), never with jq.
+#
+# NEVER put a secret in this file — it is committed. The client secret is read
+# from the provider or the agent environment only.
+
+# --- Azure identity ---------------------------------------------------------
+# Otherwise from the provider's .authentication block, then from the agent's
+# AZURE_SUBSCRIPTION_ID / AZURE_CLIENT_ID / AZURE_TENANT_ID (or ARM_*).
+# All empty, and no credentials anywhere, means the agent's own identity.
+subscription_id: ""
+client_id: ""
+tenant_id: ""
+
+# --- Azure placement --------------------------------------------------------
+# resource_group_name: otherwise from the provider's
+#   .services.resource_group_name, then $SERVICES_RESOURCE_GROUP, then
+#   $RESOURCE_GROUP — which a nullplatform Azure agent already sets.
+#
+# location: otherwise from the provider's .services.location, then
+#   $SERVICES_LOCATION. May legitimately end up empty: the deployment module
+#   then uses the target resource group's own location.
+resource_group_name: ""
+location: ""
+
+# --- Server firewall --------------------------------------------------------
+# Comma-separated public IPv4 addresses or "start-end" ranges allowed through
+# the server's firewall. The server has a public endpoint and NO other way in:
+# list at least the egress IP of the cluster that runs the nullplatform agent
+# (the link action creates roles from there) and of the linked applications.
+# On AKS with outboundType=loadBalancer both are the same address.
+#
+# Otherwise from the provider's .services.postgresql.allowed_ips (a JSON
+# array or a comma-separated string), then $SERVICES_PG_ALLOWED_IPS.
+allowed_ips: ""
+
+# --- Terraform state --------------------------------------------------------
+# An EXISTING storage account and blob container. This service never creates
+# either: it writes a per-service key under postgresql-flexible-server/<service_id>/.
+#
+# Otherwise from the provider's .services.tfstate.{storage_account,container,
+# resource_group_name}, then $AZURE_TFSTATE_STORAGE_ACCOUNT /
+# $AZURE_TFSTATE_CONTAINER / $AZURE_TFSTATE_RESOURCE_GROUP.
+#
+# Unlike everything above, the platform publishes NOTHING for these by default
+# — the agent module injects no tfstate variables. Either publish a `services`
+# block on the cloud-providers config, or set them here.
+tfstate_storage_account: ""
+tfstate_container: ""
+# Empty = resource_group_name.
+tfstate_resource_group: ""

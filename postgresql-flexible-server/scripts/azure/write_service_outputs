@@ -1,0 +1,93 @@
+#!/bin/bash
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# write_service_outputs — Reads Terraform outputs from the deployment module
+# and writes them to the nullplatform service attributes.
+#
+# This step is what makes "export" work: attributes marked export:true in the
+# service spec (hostname, port, database_name) become environment variables
+# in every linked application.
+#
+# server_name, server_id and resource_group_name are stored with
+# export:false: server_name is what keeps the name stable across renames
+# (build_context reads it back), the other two are for operators.
+#
+# The administrator credentials are NEVER written here. They stay in the
+# deployment state, where the permissions module reads them.
+# ---------------------------------------------------------------------------
+
+cd "$OUTPUT_DIR"
+
+SERVICE_ID=$(echo "$CONTEXT" | jq -r '.service.id')
+
+echo "Reading Terraform outputs for service ${SERVICE_ID}..."
+
+# do_tofu installs tofu into /tmp/np-tofu-bin in its OWN process when tofu is
+# not preinstalled; PATH is not a declared step output, so this step (a
+# separate process) would not see it otherwise.
+if [ -d /tmp/np-tofu-bin ]; then
+  export PATH="/tmp/np-tofu-bin:$PATH"
+fi
+
+if ! command -v tofu >/dev/null 2>&1; then
+  echo "ERROR: tofu is not on PATH (checked /tmp/np-tofu-bin too)." >&2
+  echo "       Terraform outputs cannot be read, so service attributes were NOT patched." >&2
+  echo "       This is a failure, not a skip: the server may well exist in Azure," >&2
+  echo "       with nothing exported to applications and every later link failing." >&2
+  exit 1
+fi
+
+# Read every output in one call and fail loudly if the call itself fails —
+# for any reason OTHER than the individual output being absent.
+if ! TOFU_OUTPUT_JSON=$(tofu output -json 2>&1); then
+  echo "ERROR: 'tofu output -json' failed. Service attributes were NOT patched:" >&2
+  echo "$TOFU_OUTPUT_JSON" >&2
+  exit 1
+fi
+
+HOSTNAME_OUT=$(printf '%s' "$TOFU_OUTPUT_JSON" | jq -r '.hostname.value // ""')
+PORT_OUT=$(printf '%s' "$TOFU_OUTPUT_JSON" | jq -r '.port.value // ""')
+DATABASE_NAME_OUT=$(printf '%s' "$TOFU_OUTPUT_JSON" | jq -r '.database_name.value // ""')
+SERVER_NAME_OUT=$(printf '%s' "$TOFU_OUTPUT_JSON" | jq -r '.server_name.value // ""')
+SERVER_ID_OUT=$(printf '%s' "$TOFU_OUTPUT_JSON" | jq -r '.server_id.value // ""')
+RESOURCE_GROUP_OUT=$(printf '%s' "$TOFU_OUTPUT_JSON" | jq -r '.resource_group_name.value // ""')
+
+if [ -z "$HOSTNAME_OUT" ]; then
+  echo "WARNING: no hostname output found. Skipping attribute update."
+  exit 0
+fi
+
+# hostname is the load-bearing attribute: build_permissions_context reads it
+# back on every link action, so it is always patched once present. The others
+# are patched only when present, rather than overwriting a previously-good
+# value with an empty string.
+EMPTY_OUTPUTS=""
+[ -z "$PORT_OUT" ]           && EMPTY_OUTPUTS="$EMPTY_OUTPUTS port"
+[ -z "$DATABASE_NAME_OUT" ]  && EMPTY_OUTPUTS="$EMPTY_OUTPUTS database_name"
+[ -z "$SERVER_NAME_OUT" ]    && EMPTY_OUTPUTS="$EMPTY_OUTPUTS server_name"
+[ -z "$SERVER_ID_OUT" ]      && EMPTY_OUTPUTS="$EMPTY_OUTPUTS server_id"
+[ -z "$RESOURCE_GROUP_OUT" ] && EMPTY_OUTPUTS="$EMPTY_OUTPUTS resource_group_name"
+if [ -n "$EMPTY_OUTPUTS" ]; then
+  echo "WARNING: the following outputs were empty and will not be patched:${EMPTY_OUTPUTS}"
+fi
+
+ATTRS=$(jq -nc \
+  --arg hostname            "$HOSTNAME_OUT" \
+  --arg port                "$PORT_OUT" \
+  --arg database_name       "$DATABASE_NAME_OUT" \
+  --arg server_name         "$SERVER_NAME_OUT" \
+  --arg server_id           "$SERVER_ID_OUT" \
+  --arg resource_group_name "$RESOURCE_GROUP_OUT" \
+  '{hostname: $hostname}
+   + (if $port                != "" then {port: ($port | tonumber)}                    else {} end)
+   + (if $database_name       != "" then {database_name: $database_name}             else {} end)
+   + (if $server_name         != "" then {server_name: $server_name}                 else {} end)
+   + (if $server_id           != "" then {server_id: $server_id}                     else {} end)
+   + (if $resource_group_name != "" then {resource_group_name: $resource_group_name} else {} end)')
+
+echo "Updating service ${SERVICE_ID} attributes:"
+echo "$ATTRS" | jq -r 'to_entries[] | "  \(.key): \(.value)"'
+
+np service patch --id "$SERVICE_ID" --body "{\"attributes\": $ATTRS}"
+echo "Service attributes updated successfully."

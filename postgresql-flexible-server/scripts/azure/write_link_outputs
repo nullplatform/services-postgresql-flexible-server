@@ -1,0 +1,78 @@
+#!/bin/bash
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# write_link_outputs — Reads Terraform outputs from the permissions module
+# and writes them to the nullplatform link attributes.
+#
+# username and jdbc_url are exported plainly; password is exported with
+# export: {secret: true}, so nullplatform stores it encrypted, returns null
+# for it from the API, and injects it into the app at runtime.
+#
+# Only these three attributes are patched. hostname, port and database_name
+# belong to the SERVICE spec: patching them here too would export them twice.
+# ---------------------------------------------------------------------------
+
+# NP_SKIP_TOFU is set by build_permissions_context when an unlink arrives for
+# a link that never finished creating. do_tofu already no-oped, so there is no
+# tofu state to read here — and OUTPUT_DIR still holds the SERVICE's
+# directory, so this must return before touching it.
+if [ "${NP_SKIP_TOFU:-false}" = "true" ]; then
+  echo "NP_SKIP_TOFU=true — nothing to do (the link never finished creating). Skipping link attribute update."
+  exit 0
+fi
+
+cd "$OUTPUT_DIR"
+
+LINK_ID_VAL=$(echo "$CONTEXT" | jq -r '.link.id')
+
+echo "Reading Terraform outputs for link ${LINK_ID_VAL}..."
+
+if [ -d /tmp/np-tofu-bin ]; then
+  export PATH="/tmp/np-tofu-bin:$PATH"
+fi
+
+if ! command -v tofu >/dev/null 2>&1; then
+  echo "ERROR: tofu is not on PATH (checked /tmp/np-tofu-bin too)." >&2
+  echo "       Terraform outputs cannot be read, so link attributes were NOT patched." >&2
+  echo "       This is a failure, not a skip: the role may well exist in PostgreSQL." >&2
+  exit 1
+fi
+
+if ! TOFU_OUTPUT_JSON=$(tofu output -json 2>&1); then
+  echo "ERROR: 'tofu output -json' failed. Link attributes were NOT patched:" >&2
+  echo "$TOFU_OUTPUT_JSON" >&2
+  exit 1
+fi
+
+USERNAME_OUT=$(printf '%s' "$TOFU_OUTPUT_JSON" | jq -r '.username.value // ""')
+PASSWORD_OUT=$(printf '%s' "$TOFU_OUTPUT_JSON" | jq -r '.password.value // ""')
+JDBC_URL_OUT=$(printf '%s' "$TOFU_OUTPUT_JSON" | jq -r '.jdbc_url.value // ""')
+
+if [ -z "$USERNAME_OUT" ]; then
+  echo "WARNING: no username output found. Skipping link attribute update."
+  exit 0
+fi
+
+EMPTY_OUTPUTS=""
+[ -z "$PASSWORD_OUT" ] && EMPTY_OUTPUTS="$EMPTY_OUTPUTS password"
+[ -z "$JDBC_URL_OUT" ] && EMPTY_OUTPUTS="$EMPTY_OUTPUTS jdbc_url"
+if [ -n "$EMPTY_OUTPUTS" ]; then
+  echo "WARNING: the following outputs were empty and will not be patched:${EMPTY_OUTPUTS}"
+fi
+
+ATTRS=$(jq -nc \
+  --arg username "$USERNAME_OUT" \
+  --arg password "$PASSWORD_OUT" \
+  --arg jdbc_url "$JDBC_URL_OUT" \
+  '{username: $username}
+   + (if $password != "" then {password: $password} else {} end)
+   + (if $jdbc_url != "" then {jdbc_url: $jdbc_url} else {} end)')
+
+echo "Updating link ${LINK_ID_VAL} attributes:"
+echo "  username: ${USERNAME_OUT}"
+echo "  password: ****"
+echo "  jdbc_url: ${JDBC_URL_OUT:-<empty>}"
+
+np link patch --id "$LINK_ID_VAL" --body "{\"attributes\": $ATTRS}"
+echo "Link attributes updated successfully."

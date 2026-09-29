@@ -1,0 +1,143 @@
+#!/bin/bash
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# do_tofu — Copies the Terraform module into OUTPUT_DIR and runs tofu there.
+#
+# Generic: contains no Azure-specific or resource-specific logic, and is
+# shared by service actions (deployment/) and link actions (permissions/).
+#
+# Expected environment (set by build_context or build_permissions_context):
+#   OUTPUT_DIR          — isolated working directory for this execution
+#   TOFU_MODULE_DIR     — module to run (deployment/ or permissions/)
+#   OUTPUT_DIR/backend.hcl — backend settings, written as a FILE (not flags)
+#   TOFU_VARIABLES      — a JSON object written to terraform.tfvars.json
+#
+# Set by the workflow YAML configuration block:
+#   TOFU_ACTION         — "apply" (default) or "destroy"
+# ---------------------------------------------------------------------------
+
+TOFU_ACTION="${TOFU_ACTION:-apply}"
+
+# ---------------------------------------------------------------------------
+# NP_SKIP_TOFU is set by build_permissions_context when an unlink arrives for
+# a link that never finished creating: there is no container to destroy, and
+# — critically — no reliable TOFU_MODULE_DIR/TOFU_VARIABLES
+# either, since that script exited before overriding what build_context set
+# two steps earlier. Running tofu at all here would risk targeting whatever
+# module the environment last pointed at (the deployment/ module and the
+# Storage Account's own state). Checked first, before even installing tofu.
+# ---------------------------------------------------------------------------
+if [ "${NP_SKIP_TOFU:-false}" = "true" ]; then
+  echo "NP_SKIP_TOFU=true — nothing to do (set by build_permissions_context because the link never finished creating). Skipping tofu entirely."
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Ensure tofu is available.
+#
+# In the packaged (OCI) deployment this whole branch never runs: the worker
+# image bakes tofu in at the version pinned by the Dockerfile's TOFU_VERSION.
+# That is precisely the point of shipping the service as an image — no download
+# in the critical path of a create/link, and one pinned version.
+#
+# The fallback below is for the git-clone deployment and for local host agents,
+# where the agent image carries no tofu. It caches into /tmp/np-tofu-bin so the
+# binary is fetched once per pod lifetime (the directory survives across
+# actions, and is cleared on pod restart).
+#
+# KEEP THE VERSION IN SYNC with the Dockerfile's TOFU_VERSION and with
+# .github/workflows/terraform.yml, or "validated in CI" and "applied in
+# production" stop meaning the same tofu.
+# ---------------------------------------------------------------------------
+if ! command -v tofu &>/dev/null; then
+  TOFU_VERSION="${TOFU_VERSION:-1.10.10}"
+  TOFU_BIN_DIR="/tmp/np-tofu-bin"
+  TOFU_BIN="$TOFU_BIN_DIR/tofu"
+
+  if [ ! -f "$TOFU_BIN" ]; then
+    # The arch used to be hardcoded to amd64, which silently installs an x86
+    # binary on an arm64 agent — and the worker image is built multi-arch.
+    case "$(uname -m)" in
+      x86_64 | amd64) TOFU_ARCH=amd64 ;;
+      aarch64 | arm64) TOFU_ARCH=arm64 ;;
+      *)
+        echo "ERROR: unsupported architecture '$(uname -m)' for the tofu fallback download." >&2
+        echo "       Preinstall tofu in the agent image, or use the packaged (OCI) deployment." >&2
+        exit 1
+        ;;
+    esac
+
+    echo "tofu not found in PATH, installing v${TOFU_VERSION} (${TOFU_ARCH}) to ${TOFU_BIN_DIR}..."
+    mkdir -p "$TOFU_BIN_DIR"
+    # tar.gz rather than the zip: busybox ships tar, but not always unzip.
+    curl -fsSL \
+      "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_${TOFU_ARCH}.tar.gz" \
+      | tar -xz -C "$TOFU_BIN_DIR" tofu
+    chmod +x "$TOFU_BIN"
+    echo "tofu installed: $("$TOFU_BIN" version | head -1)"
+  else
+    echo "Using cached tofu at ${TOFU_BIN}"
+  fi
+
+  export PATH="$TOFU_BIN_DIR:$PATH"
+fi
+
+if [ -z "${OUTPUT_DIR:-}" ] || [ -z "${TOFU_MODULE_DIR:-}" ]; then
+  echo "ERROR: OUTPUT_DIR and TOFU_MODULE_DIR must be set by the previous workflow step" >&2
+  exit 1
+fi
+
+# Defence in depth: refuse to run — "destroy" especially — against a module
+# directory that does not exist. This is exactly what would happen if a
+# module-selecting step (build_context / build_permissions_context) exited
+# before overriding TOFU_MODULE_DIR: this step would otherwise silently fall
+# back to whatever value the environment last carried, or (worse) a blanked
+# TOFU_MODULE_DIR would make "$TOFU_MODULE_DIR"/* below expand to "/*".
+if [ ! -d "$TOFU_MODULE_DIR" ]; then
+  echo "ERROR: refusing to run 'tofu ${TOFU_ACTION}' — TOFU_MODULE_DIR ('${TOFU_MODULE_DIR}') does not exist." >&2
+  echo "       The step that should have set it likely exited early without overriding the value" >&2
+  echo "       inherited from an earlier action, which would otherwise target the wrong module." >&2
+  exit 1
+fi
+
+# Always log what is about to be targeted, for apply as much as destroy, so
+# the log shows what ran even when nothing else does.
+echo "Action: ${TOFU_ACTION}"
+echo "Module: ${TOFU_MODULE_DIR}"
+
+cd "$OUTPUT_DIR"
+
+# Copy the module in rather than running "tofu -chdir" against the shared
+# module directory: two concurrent actions would otherwise race on .terraform/
+# and on each other's generated files.
+cp -r "$TOFU_MODULE_DIR"/* .
+
+# Values arrive as a JSON object, never as -var= flags: nothing is word-split
+# as argv, so no user-supplied value can smuggle an extra flag into tofu.
+#
+# The default is spelled out on two lines on purpose: "${VAR:-\{\}}" does NOT
+# produce {} — inside double quotes those backslashes are literal, so it yields
+# the four-character string \{\}, which is not valid JSON. Verified.
+TFVARS_JSON="${TOFU_VARIABLES:-}"
+if [ -z "$TFVARS_JSON" ]; then
+  TFVARS_JSON='{}'
+fi
+printf '%s' "$TFVARS_JSON" > terraform.tfvars.json
+
+# backend.hcl is written into OUTPUT_DIR by build_context /
+# build_permissions_context, and the flag is built HERE rather than carried in
+# an environment variable: an init command line assembled from a string that
+# crossed the engine's env channel is one quote away from becoming a
+# positional argument.
+echo "Running: tofu init"
+if [ -f backend.hcl ]; then
+  tofu init -input=false -backend-config=backend.hcl
+else
+  echo "ERROR: backend.hcl not found in ${OUTPUT_DIR}." >&2
+  echo "       The build-context step must write it before this step runs." >&2
+  exit 1
+fi
+
+echo "Running: tofu ${TOFU_ACTION}"
+tofu "$TOFU_ACTION" -auto-approve -var-file=terraform.tfvars.json

@@ -1,0 +1,19 @@
+# Drops the link's PostgreSQL role.
+#
+# Data is preserved: anything the role owned (tables an admin link created
+# through its migrations) is reassigned to the administrator before the role
+# is dropped, so the database keeps every table and row. Only the credential
+# goes away, which is what revocation means here.
+#
+# The link's state lives under its own key inside the service's tfstate
+# prefix, so this destroy cannot touch the server's own state.
+include:
+  - "$SERVICE_PATH/workflows/azure/link.yaml"
+
+steps:
+  - name: tofu
+    type: script
+    file: $SERVICE_PATH/scripts/azure/do_tofu
+    action: replace
+    configuration:
+      TOFU_ACTION: destroy

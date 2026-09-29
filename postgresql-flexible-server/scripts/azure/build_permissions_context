@@ -1,0 +1,115 @@
+#!/bin/bash
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# build_permissions_context — Prepares the Terraform execution environment
+# for link actions (link / link-update / unlink). Runs AFTER build_context,
+# which has already set CONTEXT, VALUES, SERVICE_PATH, TFSTATE_*, and the
+# LINK_* variables.
+#
+# The target server is not passed to the module at all: the permissions
+# module reads hostname, database and administrator credentials from the
+# deployment module's state (terraform_remote_state), so only the state
+# coordinates travel from here. The service attributes are checked to fail
+# early and clearly when the create never completed.
+# ---------------------------------------------------------------------------
+
+if [ -z "${LINK_ID:-}" ]; then
+  echo "ERROR: LINK_ID is not set. Expected to be exported by build_context." >&2
+  exit 1
+fi
+
+if [ -z "${TFSTATE_STORAGE_ACCOUNT:-}" ] || [ -z "${TFSTATE_CONTAINER:-}" ] || [ -z "${TFSTATE_RESOURCE_GROUP:-}" ] || [ -z "${TFSTATE_KEY:-}" ]; then
+  echo "ERROR: TFSTATE_STORAGE_ACCOUNT, TFSTATE_CONTAINER, TFSTATE_RESOURCE_GROUP and TFSTATE_KEY must be exported by build_context." >&2
+  exit 1
+fi
+
+ACTION_TYPE=$(echo "$CONTEXT" | jq -r '.type // ""')
+SERVICE_ID=$(echo "$CONTEXT" | jq -r '.service.id')
+
+# --- Target server (from service attributes) --------------------------------
+
+SERVICE_ATTRS=$(echo "$CONTEXT" | jq -c '.service.attributes // {}')
+
+TARGET_HOSTNAME=$(echo "$SERVICE_ATTRS" | jq -r '.hostname // ""')
+
+USERNAME="${LINK_USERNAME:-}"
+
+# --- Unlink on a link that never completed ---------------------------------
+# No role was ever created (the service has no hostname, so the link action
+# could not have connected), and no state to speak of. Exiting 0 keeps the
+# platform from stranding the link in a failed delete.
+
+if [ -z "$TARGET_HOSTNAME" ]; then
+  if [ "$ACTION_TYPE" = "delete" ]; then
+    echo "WARNING: unlink on a service with no hostname — the link was never fully created. Nothing to destroy."
+    # CRITICAL: this exits BEFORE the Terraform execution environment below is
+    # overridden. Without NP_SKIP_TOFU, the next step (do_tofu, TOFU_ACTION=
+    # destroy) would inherit OUTPUT_DIR/TOFU_MODULE_DIR/TOFU_VARIABLES from
+    # build_context two steps ago — the deployment/ module and
+    # key=deployment.tfstate — and run "tofu destroy" against the server.
+    # NP_SKIP_TOFU tells do_tofu and write_link_outputs to no-op instead.
+    # TOFU_MODULE_DIR is also blanked out as defence in depth.
+    export NP_SKIP_TOFU=true
+    export TOFU_MODULE_DIR=""
+    exit 0
+  fi
+  echo "ERROR: hostname not found in the service attributes." >&2
+  echo "       The service's create action has not completed successfully — check that" >&2
+  echo "       write_service_outputs ran and patched the service attributes." >&2
+  exit 1
+fi
+
+if [ -z "$USERNAME" ]; then
+  echo "ERROR: no username for this link. build_context derives one from the link id on create;" >&2
+  echo "       an update or unlink expects it stored in the link attributes." >&2
+  exit 1
+fi
+
+if [[ ! "$USERNAME" =~ ^[a-z][a-z0-9_]{2,62}$ ]]; then
+  echo "ERROR: invalid username '${USERNAME}'" >&2
+  echo "       (required: 3-63 lowercase letters, digits and underscores, starting with a letter)" >&2
+  exit 1
+fi
+
+echo "Link ${LINK_ID}: role=${USERNAME} server=${TARGET_HOSTNAME} access=${LINK_ACCESS_LEVEL:-admin}"
+
+# --- Terraform execution environment ---------------------------------------
+# Override OUTPUT_DIR so each link has an isolated workspace, and put the
+# link's state under its own key inside the service's tfstate prefix.
+
+OUTPUT_DIR="/tmp/np-link-${LINK_ID}"
+mkdir -p "$OUTPUT_DIR"
+
+TOFU_MODULE_DIR="$SERVICE_PATH/permissions"
+
+# A file, not a flag string — see the note in build_context.
+cat > "${OUTPUT_DIR}/backend.hcl" <<EOF
+resource_group_name  = "${TFSTATE_RESOURCE_GROUP}"
+storage_account_name = "${TFSTATE_STORAGE_ACCOUNT}"
+container_name       = "${TFSTATE_CONTAINER}"
+key                  = "postgresql-flexible-server/${SERVICE_ID}/links/${LINK_ID}.tfstate"
+use_azuread_auth     = true
+EOF
+
+TOFU_INIT_VARIABLES=""
+
+TOFU_VARIABLES=$(jq -nc \
+  --arg link_id                      "$LINK_ID" \
+  --arg username                     "$USERNAME" \
+  --arg access_level                 "${LINK_ACCESS_LEVEL:-admin}" \
+  --arg tfstate_resource_group_name  "$TFSTATE_RESOURCE_GROUP" \
+  --arg tfstate_storage_account_name "$TFSTATE_STORAGE_ACCOUNT" \
+  --arg tfstate_container_name       "$TFSTATE_CONTAINER" \
+  --arg deployment_state_key         "$TFSTATE_KEY" \
+  '{
+    link_id:                      $link_id,
+    username:                     $username,
+    access_level:                 $access_level,
+    tfstate_resource_group_name:  $tfstate_resource_group_name,
+    tfstate_storage_account_name: $tfstate_storage_account_name,
+    tfstate_container_name:       $tfstate_container_name,
+    deployment_state_key:         $deployment_state_key
+  }')
+
+export OUTPUT_DIR TOFU_MODULE_DIR TOFU_INIT_VARIABLES TOFU_VARIABLES

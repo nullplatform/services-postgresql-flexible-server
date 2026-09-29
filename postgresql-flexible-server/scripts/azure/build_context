@@ -1,0 +1,357 @@
+#!/bin/bash
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# build_context — Turns the nullplatform notification into a Terraform
+# execution environment for service actions (create / update / delete / read).
+#
+# On link actions it additionally exports the LINK_* variables that
+# build_permissions_context consumes in the next workflow step.
+#
+# This script CREATES NOTHING in Azure and shells out to no cloud CLI. It only
+# derives names and paths. The tfstate container is required to exist already
+# (see the "tfstate location" section below), which is what makes every action
+# — `read` included — safe to run with no Azure session.
+# ---------------------------------------------------------------------------
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/resolve_placement_lib"
+
+# Each script needs its own copy — shell functions do not carry across steps.
+# CRITICAL: $VALUES is a FILE PATH, not JSON content.
+yaml_value() {
+  local key="$1" default="$2" file="$3"
+  local raw val
+  raw=$(grep "^${key}:" "$file" 2>/dev/null | head -1) || true
+  if [ -z "$raw" ]; then
+    echo "$default"
+    return 0
+  fi
+
+  val="${raw#*:}"
+  # Trim leading whitespace.
+  val="${val#"${val%%[![:space:]]*}"}"
+
+  # A quoted value ends at its closing quote; anything after it (typically an
+  # inline comment) is not part of the value. An unquoted value ends at the
+  # first "#".
+  case "$val" in
+    '"'*) val="${val#\"}"; val="${val%%\"*}" ;;
+    "'"*) val="${val#\'}"; val="${val%%\'*}" ;;
+    *)
+      val="${val%%#*}"
+      val="${val%"${val##*[![:space:]]}"}"
+      ;;
+  esac
+
+  echo "${val:-$default}"
+}
+
+# --- Service identity -------------------------------------------------------
+
+SERVICE_ID=$(echo "$CONTEXT" | jq -r '.service.id')
+SERVICE_NAME=$(echo "$CONTEXT" | jq -r '.service.name // ""')
+
+if [ -z "$SERVICE_ID" ] || [ "$SERVICE_ID" = "null" ]; then
+  echo "ERROR: .service.id is missing from the notification context" >&2
+  exit 1
+fi
+
+# --- Merge stored attributes with this action's parameters ------------------
+# CRITICAL: on the first "create", .service.attributes is empty or incomplete;
+# user-supplied values arrive in .parameters. jq's * merges objects with the
+# right-hand side winning, so parameters always take precedence.
+
+SERVICE_ATTRS=$(echo "$CONTEXT" | jq -c '(.service.attributes // {}) * (.parameters // {})')
+
+# --- Server name must be STABLE once created --------------------------------
+# server_name is editableOn: [] in the spec, so it never legitimately arrives
+# via .parameters. A previously stored server_name always wins: recomputing it
+# from .service.name on every action means renaming the service instance in
+# nullplatform computes a different name on the next "update" — and "name"
+# forces replacement on azurerm_postgresql_flexible_server, destroying the
+# server and every database in it.
+STORED_SERVER_NAME=$(echo "$SERVICE_ATTRS" | jq -r '.server_name // ""')
+
+if [ -n "$STORED_SERVER_NAME" ]; then
+  SERVER_NAME="$STORED_SERVER_NAME"
+else
+  SERVER_NAME=$("$SCRIPT_DIR/server_name" "$SERVICE_NAME" "$SERVICE_ID")
+fi
+
+# Validate whichever value is used, not just the freshly-computed one: a
+# stored attribute could in principle be corrupted or hand-edited.
+if [[ ! "$SERVER_NAME" =~ ^[a-z0-9]([a-z0-9-]{1,61}[a-z0-9])?$ ]] || [ "${#SERVER_NAME}" -lt 3 ]; then
+  echo "ERROR: server name '${SERVER_NAME}' is not a valid Azure Flexible Server name" >&2
+  echo "       (required: 3-63 lowercase letters, digits and hyphens, no leading or trailing hyphen)" >&2
+  exit 1
+fi
+
+DATABASE_NAME=$(echo "$SERVICE_ATTRS"         | jq -r '.database_name          // ""')
+POSTGRES_VERSION=$(echo "$SERVICE_ATTRS"      | jq -r '.postgres_version       // "17"')
+SKU_NAME=$(echo "$SERVICE_ATTRS"              | jq -r '.sku_name               // "B_Standard_B1ms"')
+STORAGE_MB=$(echo "$SERVICE_ATTRS"            | jq -r '.storage_mb             // 32768')
+BACKUP_RETENTION_DAYS=$(echo "$SERVICE_ATTRS" | jq -r '.backup_retention_days  // 7')
+HIGH_AVAILABILITY=$(echo "$SERVICE_ATTRS"     | jq -r '.high_availability      // false')
+
+# --- Validate ---------------------------------------------------------------
+# These come from an authenticated API caller but are still user input. The
+# module repeats the same rules in validation{} blocks so a hand-run
+# "tofu plan" enforces them too.
+#
+# database_name is the one attribute a `read` or `delete` may legitimately
+# see empty (an instance whose create never ran): only a SERVICE create or
+# update insists. On link actions .type describes the link, and the service
+# attributes are checked by build_permissions_context instead.
+
+ACTION_TYPE=$(echo "$CONTEXT" | jq -r '.type // ""')
+SERVICE_WRITE=false
+if [ "${ACTION_SOURCE:-service}" = "service" ] && [[ "$ACTION_TYPE" =~ ^(create|update)$ ]]; then
+  SERVICE_WRITE=true
+fi
+
+if [ -z "$DATABASE_NAME" ] && [ "$SERVICE_WRITE" = "true" ]; then
+  echo "ERROR: database_name is required" >&2
+  exit 1
+fi
+
+if [ -n "$DATABASE_NAME" ] && [[ ! "$DATABASE_NAME" =~ ^[a-z][a-z0-9_]{0,62}$ ]]; then
+  echo "ERROR: invalid database_name '${DATABASE_NAME}'" >&2
+  echo "       (expected 1-63 lowercase letters, digits and underscores, starting with a letter)" >&2
+  exit 1
+fi
+
+if [[ ! "$POSTGRES_VERSION" =~ ^(16|17)$ ]]; then
+  echo "ERROR: invalid postgres_version '${POSTGRES_VERSION}' (expected 16 or 17)" >&2
+  exit 1
+fi
+
+if [[ ! "$SKU_NAME" =~ ^(B|GP|MO)_Standard_[A-Za-z0-9_]+$ ]]; then
+  echo "ERROR: invalid sku_name '${SKU_NAME}' (expected B_Standard_B1ms, GP_Standard_D2s_v3, ...)" >&2
+  exit 1
+fi
+
+if [[ ! "$STORAGE_MB" =~ ^[0-9]+$ ]] || [ "$STORAGE_MB" -lt 32768 ]; then
+  echo "ERROR: invalid storage_mb '${STORAGE_MB}' (expected an integer of at least 32768)" >&2
+  exit 1
+fi
+
+if [[ ! "$BACKUP_RETENTION_DAYS" =~ ^[0-9]+$ ]] || [ "$BACKUP_RETENTION_DAYS" -lt 7 ] || [ "$BACKUP_RETENTION_DAYS" -gt 35 ]; then
+  echo "ERROR: invalid backup_retention_days '${BACKUP_RETENTION_DAYS}' (expected an integer between 7 and 35)" >&2
+  exit 1
+fi
+
+if [[ ! "$HIGH_AVAILABILITY" =~ ^(true|false)$ ]]; then
+  echo "ERROR: invalid high_availability '${HIGH_AVAILABILITY}' (expected true or false)" >&2
+  exit 1
+fi
+
+# --- Azure placement -------------------------------------------------------
+# Three tiers, resolved per field: values.yaml -> cloud-providers provider ->
+# agent environment. See resolve_placement_lib for why, and for the shape of
+# the provider's `services` block.
+
+V_RG=$(yaml_value "resource_group_name" "" "$VALUES")
+V_LOC=$(yaml_value "location" "" "$VALUES")
+V_IPS=$(yaml_value "allowed_ips" "" "$VALUES")
+V_TF_SA=$(yaml_value "tfstate_storage_account" "" "$VALUES")
+V_TF_RG=$(yaml_value "tfstate_resource_group" "" "$VALUES")
+V_TF_CT=$(yaml_value "tfstate_container" "" "$VALUES")
+
+# The provider is read for placement only; credentials are resolved by
+# resolve_azure_credentials in its own step. read.yaml has no credential step
+# and still needs placement, which is why this lookup lives here and not there.
+# A failure is not fatal: the values.yaml and environment tiers still apply.
+PLACEMENT_NRN=$(echo "${CONTEXT:-}" | jq -r '.service.nrn // .link.scope.nrn // .entity_nrn // ""' 2>/dev/null) || PLACEMENT_NRN=""
+
+PROVIDER_ATTRS='{}'
+if [ -n "$PLACEMENT_NRN" ]; then
+  # NOTE: --limit is incompatible with --categories (np rejects it). Do not add it.
+  PROVIDER_ATTRS=$(np provider list \
+    --nrn "$PLACEMENT_NRN" \
+    --categories cloud-providers \
+    --format json 2>/dev/null \
+    | jq -c '(.results // [])[0].attributes // {}' 2>/dev/null) || PROVIDER_ATTRS='{}'
+  [ -z "$PROVIDER_ATTRS" ] && PROVIDER_ATTRS='{}'
+fi
+
+RESOURCE_GROUP_NAME=$(placement_resource_group "$PROVIDER_ATTRS" "$V_RG")
+LOCATION=$(placement_location "$PROVIDER_ATTRS" "$V_LOC")
+ALLOWED_IPS=$(placement_allowed_ips "$PROVIDER_ATTRS" "$V_IPS")
+TFSTATE_STORAGE_ACCOUNT=$(placement_tfstate_storage_account "$PROVIDER_ATTRS" "$V_TF_SA")
+TFSTATE_CONTAINER=$(placement_tfstate_container "$PROVIDER_ATTRS" "$V_TF_CT")
+TFSTATE_RESOURCE_GROUP=$(placement_tfstate_resource_group "$PROVIDER_ATTRS" "$V_TF_RG" "$RESOURCE_GROUP_NAME")
+
+if [ -z "$RESOURCE_GROUP_NAME" ]; then
+  echo "ERROR: resource_group_name is not set." >&2
+  echo "       Resolved from, in order: values.yaml, the cloud-providers provider" >&2
+  echo "       (.services.resource_group_name), \$SERVICES_RESOURCE_GROUP, \$RESOURCE_GROUP." >&2
+  echo "       A nullplatform Azure agent normally supplies \$RESOURCE_GROUP already." >&2
+  exit 1
+fi
+
+if [ -z "$TFSTATE_STORAGE_ACCOUNT" ]; then
+  echo "ERROR: tfstate_storage_account is not set." >&2
+  echo "       Resolved from, in order: values.yaml, the cloud-providers provider" >&2
+  echo "       (.services.tfstate.storage_account), \$AZURE_TFSTATE_STORAGE_ACCOUNT." >&2
+  exit 1
+fi
+
+# --- Firewall ---------------------------------------------------------------
+# A comma-separated list becomes a JSON array for the module. Each entry is
+# validated here so a stray value fails before tofu ever runs.
+
+# --arg rather than a pipe into jq -R: with an empty list jq -R reads no
+# line at all and emits nothing, which is not valid JSON for --argjson below.
+ALLOWED_IPS_JSON=$(jq -nc --arg s "$ALLOWED_IPS" '$s | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')
+
+while IFS= read -r ip; do
+  [ -n "$ip" ] || continue
+  if [[ ! "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}(-([0-9]{1,3}\.){3}[0-9]{1,3})?$ ]]; then
+    echo "ERROR: invalid allowed_ips entry '${ip}' (expected an IPv4 address or a start-end range)" >&2
+    exit 1
+  fi
+done < <(printf '%s' "$ALLOWED_IPS_JSON" | jq -r '.[]')
+
+if [ "$(printf '%s' "$ALLOWED_IPS_JSON" | jq 'length')" -eq 0 ] && [ "$SERVICE_WRITE" = "true" ]; then
+  echo "WARNING: allowed_ips is empty. The server has a public endpoint and no firewall rule," >&2
+  echo "         so NOTHING can connect to it — not the linked applications, and not the link" >&2
+  echo "         action that creates their roles. Set it in values.yaml, on the cloud-providers" >&2
+  echo "         provider (.services.postgresql.allowed_ips) or as \$SERVICES_PG_ALLOWED_IPS." >&2
+fi
+
+# LOCATION is deliberately allowed to be empty: the deployment module falls
+# back to the target resource group's own location via a data source, so the
+# common single-region setup needs no location configured anywhere.
+echo "Azure placement: resource_group=${RESOURCE_GROUP_NAME} location=${LOCATION:-<resource group default>}"
+echo "   resource_group: $(placement_source "$V_RG" "$(provider_field "$PROVIDER_ATTRS" services.resource_group_name)" "$(first_non_empty "${SERVICES_RESOURCE_GROUP:-}" "${RESOURCE_GROUP:-}")")"
+echo "   location:       $(placement_source "$V_LOC" "$(provider_field "$PROVIDER_ATTRS" services.location)" "${SERVICES_LOCATION:-}")"
+echo "   allowed_ips:    ${ALLOWED_IPS:-<none>}"
+echo "Server name: ${SERVER_NAME}"
+
+# --- tfstate location -------------------------------------------------------
+# A SHARED container with a per-service KEY, not a container per service, and
+# not a container this service creates. See services-blob-storage for the
+# full rationale: Azure storage accounts are globally named and slow to create,
+# so one per service is not an option, and the location is configuration
+# resolved through the same three tiers as the rest of the placement.
+
+if [ -z "$TFSTATE_CONTAINER" ]; then
+  echo "ERROR: tfstate_container is not set." >&2
+  echo "       Resolved from, in order: values.yaml, the cloud-providers provider" >&2
+  echo "       (.services.tfstate.container), \$AZURE_TFSTATE_CONTAINER." >&2
+  echo "       It must name an EXISTING blob container; this service never creates one." >&2
+  exit 1
+fi
+
+TFSTATE_KEY="postgresql-flexible-server/${SERVICE_ID}/deployment.tfstate"
+
+echo "tfstate: ${TFSTATE_STORAGE_ACCOUNT}/${TFSTATE_CONTAINER}/${TFSTATE_KEY}"
+
+# --- Terraform execution environment ---------------------------------------
+
+OUTPUT_DIR="/tmp/np-service-${SERVICE_ID}"
+mkdir -p "$OUTPUT_DIR"
+
+TOFU_MODULE_DIR="$SERVICE_PATH/deployment"
+
+# use_azuread_auth=true: the azurerm backend defaults to shared-key auth and
+# resolves the account key via ARM listKeys, which the README's documented
+# Storage Blob Data Contributor role does not grant on the tfstate account.
+# The backend settings go in a FILE, not in a string of -backend-config flags:
+# a flag string has to survive the workflow engine's environment channel
+# intact and then be word-split back into argv, and one added quote turns a
+# flag into a positional argument.
+cat > "${OUTPUT_DIR}/backend.hcl" <<EOF
+resource_group_name  = "${TFSTATE_RESOURCE_GROUP}"
+storage_account_name = "${TFSTATE_STORAGE_ACCOUNT}"
+container_name       = "${TFSTATE_CONTAINER}"
+key                  = "${TFSTATE_KEY}"
+use_azuread_auth     = true
+EOF
+
+TOFU_INIT_VARIABLES=""
+
+TAGS=$(echo "$CONTEXT" | jq -c '.tags // {} | with_entries(.value |= tostring)')
+
+TOFU_VARIABLES=$(jq -nc \
+  --arg     service_id            "$SERVICE_ID" \
+  --arg     server_name           "$SERVER_NAME" \
+  --arg     resource_group_name   "$RESOURCE_GROUP_NAME" \
+  --arg     location              "$LOCATION" \
+  --arg     database_name         "$DATABASE_NAME" \
+  --arg     postgres_version      "$POSTGRES_VERSION" \
+  --arg     sku_name              "$SKU_NAME" \
+  --argjson storage_mb            "$STORAGE_MB" \
+  --argjson backup_retention_days "$BACKUP_RETENTION_DAYS" \
+  --argjson high_availability     "$HIGH_AVAILABILITY" \
+  --argjson allowed_ips           "$ALLOWED_IPS_JSON" \
+  --argjson tags                  "$TAGS" \
+  '{
+    service_id:            $service_id,
+    server_name:           $server_name,
+    resource_group_name:   $resource_group_name,
+    location:              $location,
+    database_name:         $database_name,
+    postgres_version:      $postgres_version,
+    sku_name:              $sku_name,
+    storage_mb:            $storage_mb,
+    backup_retention_days: $backup_retention_days,
+    high_availability:     $high_availability,
+    allowed_ips:           $allowed_ips,
+    tags:                  $tags
+  }')
+
+export SERVICE_ID SERVICE_NAME SERVER_NAME DATABASE_NAME
+export RESOURCE_GROUP_NAME LOCATION ALLOWED_IPS
+export TFSTATE_STORAGE_ACCOUNT TFSTATE_RESOURCE_GROUP TFSTATE_CONTAINER TFSTATE_KEY
+export OUTPUT_DIR TOFU_MODULE_DIR TOFU_INIT_VARIABLES TOFU_VARIABLES
+
+# --- Link context (link workflows only) ------------------------------------
+# Consumed by build_permissions_context in the next step. Every field comes
+# from the notification payload; never call the API to resolve slugs or NRNs.
+
+if [ "${ACTION_SOURCE:-}" = "link" ]; then
+  LINK_ID=$(echo "$CONTEXT"   | jq -r '.link.id        // ""')
+  LINK_NAME=$(echo "$CONTEXT" | jq -r '.link.name      // .link.slug // ""')
+  SCOPE_ID=$(echo "$CONTEXT"  | jq -r '.link.scope.id  // .tags.scope_id // ""')
+  SCOPE_NRN=$(echo "$CONTEXT" | jq -r '.link.scope.nrn // ""')
+  SCOPE_SLUG=$(echo "$CONTEXT" | jq -r '.link.scope.slug // .tags.scope // ""')
+  APP_SLUG=$(echo "$CONTEXT"  | jq -r '.link.entity.slug // .tags.application // ""')
+  APP_NRN=$(echo "$CONTEXT"   | jq -r '.link.entity.nrn  // ""')
+
+  LINK_ATTRS=$(echo "$CONTEXT" | jq -c '(.link.attributes // {}) * (.parameters // {})')
+
+  LINK_ACCESS_LEVEL=$(echo "$LINK_ATTRS" | jq -r '.access_level // "admin"')
+
+  if [[ ! "$LINK_ACCESS_LEVEL" =~ ^(read|read-write|admin)$ ]]; then
+    echo "ERROR: invalid access_level '${LINK_ACCESS_LEVEL}' (expected read, read-write or admin)" >&2
+    exit 1
+  fi
+
+  # The role name must be STABLE once created: postgresql_role forces
+  # replacement on a rename, which would drop the role and the grants the
+  # application is using. A stored username always wins; the fallback derives
+  # one from the application slug and the link id on the very first link.
+  STORED_USERNAME=$(echo "$LINK_ATTRS" | jq -r '.username // ""')
+
+  if [ -n "$STORED_USERNAME" ]; then
+    LINK_USERNAME="$STORED_USERNAME"
+  elif [ -n "$LINK_ID" ]; then
+    _app=$(printf '%s' "$APP_SLUG" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9\n' '_' | tr -s '_' | sed 's/^_//; s/_$//' | cut -c1-40)
+    _lid=$(printf '%s' "$LINK_ID" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9' | cut -c1-8)
+    LINK_USERNAME="u_${_app:-app}_${_lid}"
+  else
+    LINK_USERNAME=""
+  fi
+
+  if [ -n "$LINK_USERNAME" ] && [[ ! "$LINK_USERNAME" =~ ^[a-z][a-z0-9_]{2,62}$ ]]; then
+    echo "ERROR: username '${LINK_USERNAME}' is not a valid PostgreSQL role name for this service" >&2
+    echo "       (required: 3-63 lowercase letters, digits and underscores, starting with a letter)" >&2
+    exit 1
+  fi
+
+  export LINK_ID LINK_NAME SCOPE_ID SCOPE_NRN SCOPE_SLUG APP_SLUG APP_NRN
+  export LINK_ACCESS_LEVEL LINK_USERNAME
+fi

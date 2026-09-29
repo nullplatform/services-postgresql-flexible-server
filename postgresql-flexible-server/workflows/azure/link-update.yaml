@@ -1,0 +1,14 @@
+# Reapplies the link's grants after an attribute change (a new access_level).
+# The role and its password are unchanged: the password is anchored in state
+# and only a new link issues a new one. Identical to link.yaml; the explicit
+# replace keeps the include shape uniform with unlink.yaml.
+include:
+  - "$SERVICE_PATH/workflows/azure/link.yaml"
+
+steps:
+  - name: tofu
+    type: script
+    file: $SERVICE_PATH/scripts/azure/do_tofu
+    action: replace
+    configuration:
+      TOFU_ACTION: apply

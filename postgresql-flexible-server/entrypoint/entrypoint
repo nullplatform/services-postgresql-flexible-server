@@ -1,0 +1,86 @@
+#!/bin/bash
+set -euo pipefail
+
+if [ -z "${NP_ACTION_CONTEXT:-}" ]; then
+  echo "NP_ACTION_CONTEXT is not set. Exiting."
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Bridge the agent API key to the np CLI.
+# np-agent passes NP_API_KEY; the np CLI expects NULLPLATFORM_API_KEY.
+# Without this bridge, "np service patch" fails with:
+#   "please login first, refresh token or organization id not found"
+# ---------------------------------------------------------------------------
+if [ -n "${NP_API_KEY:-}" ] && [ -z "${NULLPLATFORM_API_KEY:-}" ]; then
+  export NULLPLATFORM_API_KEY="$NP_API_KEY"
+fi
+
+# Strip surrounding single quotes that np-agent may wrap the context in.
+CLEAN_CONTEXT=$(echo "$NP_ACTION_CONTEXT" | sed "s/^'//;s/'$//")
+export NP_ACTION_CONTEXT="$CLEAN_CONTEXT"
+
+CONTEXT=$(echo "$CLEAN_CONTEXT" | jq '.notification')
+export CONTEXT
+SERVICE_ACTION=$(echo "$CONTEXT"      | jq -r '.slug')
+SERVICE_ACTION_TYPE=$(echo "$CONTEXT" | jq -r '.type')
+NOTIFICATION_ACTION=$(echo "$CONTEXT" | jq -r '.action')
+LINK=$(echo "$CONTEXT"                | jq '.link')
+export SERVICE_ACTION SERVICE_ACTION_TYPE NOTIFICATION_ACTION LINK
+
+ACTION_SOURCE=service
+IS_LINK_ACTION=$(echo "$CONTEXT" | jq '.link != null')
+
+if [ "$IS_LINK_ACTION" = "true" ]; then
+  ACTION_SOURCE=link
+fi
+
+WORKING_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export WORKING_DIRECTORY
+
+SERVICE_PATH=""
+OVERRIDES_PATH=""
+
+for arg in "$@"; do
+  case $arg in
+    --service-path=*)
+      SERVICE_PATH="${arg#*=}"
+      ;;
+    --overrides-path=*)
+      OVERRIDES_PATH="${arg#*=}"
+      ;;
+    *)
+      echo "Unknown argument: $arg"
+      exit 1
+      ;;
+  esac
+done
+
+SERVICE_PATH="${SERVICE_PATH:-$(dirname "$WORKING_DIRECTORY")}"
+
+# ---------------------------------------------------------------------------
+# Resolve a relative SERVICE_PATH to an absolute one.
+# The agent child process inherits the CWD of wherever np-agent was started,
+# which is NOT necessarily ~/.np/ (the basepath). Try the current CWD first,
+# then fall back to ~/.np/.
+# Without this, "cd <relative-path>" fails silently (exit 1, no output) and
+# is the single most common cause of an action that "does nothing".
+# ---------------------------------------------------------------------------
+if [[ "$SERVICE_PATH" != /* ]]; then
+  if [ -d "$SERVICE_PATH" ]; then
+    SERVICE_PATH="$(cd "$SERVICE_PATH" && pwd)"
+  elif [ -d "$HOME/.np/$SERVICE_PATH" ]; then
+    SERVICE_PATH="$(cd "$HOME/.np/$SERVICE_PATH" && pwd)"
+  else
+    echo "ERROR: Cannot resolve SERVICE_PATH='$SERVICE_PATH' from CWD=$(pwd) or $HOME/.np/"
+    exit 1
+  fi
+fi
+
+OVERRIDES_PATH="${OVERRIDES_PATH:-$SERVICE_PATH/overrides}"
+
+export SERVICE_PATH
+export OVERRIDES_PATH
+export ACTION_SOURCE
+
+np service-action exec --live-output --live-report --script="$WORKING_DIRECTORY/$ACTION_SOURCE"

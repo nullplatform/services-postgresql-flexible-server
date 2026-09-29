@@ -1,0 +1,47 @@
+{
+  "id": "1f2e3d4c-5b6a-7988-9a0b-c1d2e3f40506",
+  "source": "service",
+  "event": "service:action:create",
+  "created_at": "2026-09-29T12:00:00.000Z",
+  "notification": {
+    "action": "service:action:create",
+    "id": "aaaaaaaa-1111-2222-3333-444444444444",
+    "name": "create-postgresql-flexible-server",
+    "slug": "create-postgresql-flexible-server",
+    "status": "pending",
+    "type": "create",
+    "parameters": {
+      "database_name": "conciliation",
+      "postgres_version": "17",
+      "sku_name": "B_Standard_B1ms",
+      "storage_mb": 32768,
+      "backup_retention_days": 14,
+      "high_availability": false
+    },
+    "results": {},
+    "specification": {
+      "id": "bbbbbbbb-1111-2222-3333-444444444444",
+      "slug": "create-postgresql-flexible-server"
+    },
+    "service": {
+      "id": "9f8e7d6c-1234-4321-abcd-000000000000",
+      "name": "Conciliation DB",
+      "slug": "conciliation-db",
+      "nrn": "organization=11111111:account=2097086864:namespace=55555555",
+      "attributes": {},
+      "specification": {
+        "id": "cccccccc-1111-2222-3333-444444444444",
+        "slug": "postgresql-flexible-server"
+      },
+      "dimensions": {
+        "environment": "development"
+      }
+    },
+    "link": null,
+    "tags": {
+      "organization_id": "11111111",
+      "organization": "implementations"
+    },
+    "entity_nrn": "organization=11111111:account=2097086864:namespace=55555555"
+  }
+}

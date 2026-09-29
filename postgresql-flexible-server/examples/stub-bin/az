@@ -1,0 +1,5 @@
+#!/bin/bash
+# Test stub. Appends its argv to $AZ_STUB_LOG.
+set -euo pipefail
+printf '%s\n' "az $*" >> "${AZ_STUB_LOG:?AZ_STUB_LOG must be set}"
+exit "${AZ_STUB_EXIT:-0}"

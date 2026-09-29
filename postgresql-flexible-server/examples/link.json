@@ -1,0 +1,59 @@
+{
+  "id": "2a3b4c5d-6e7f-8091-a2b3-c4d5e6f70809",
+  "source": "service",
+  "event": "link:action:create",
+  "created_at": "2026-09-29T12:30:00.000Z",
+  "notification": {
+    "action": "link:action:create",
+    "id": "dddddddd-1111-2222-3333-444444444444",
+    "name": "create-connect",
+    "slug": "create-connect",
+    "status": "pending",
+    "type": "create",
+    "parameters": {
+      "access_level": "admin"
+    },
+    "results": {},
+    "service": {
+      "id": "9f8e7d6c-1234-4321-abcd-000000000000",
+      "name": "Conciliation DB",
+      "slug": "conciliation-db",
+      "nrn": "organization=11111111:account=2097086864:namespace=55555555",
+      "attributes": {
+        "hostname": "conciliation-db-9f8e7d6c.postgres.database.azure.com",
+        "port": 5432,
+        "database_name": "conciliation",
+        "server_name": "conciliation-db-9f8e7d6c",
+        "server_id": "/subscriptions/sub-1234/resourceGroups/rg-pg-test/providers/Microsoft.DBforPostgreSQL/flexibleServers/conciliation-db-9f8e7d6c",
+        "resource_group_name": "rg-pg-test",
+        "postgres_version": "17",
+        "sku_name": "B_Standard_B1ms"
+      },
+      "dimensions": {
+        "environment": "development"
+      }
+    },
+    "link": {
+      "id": "eeeeeeee-1111-2222-3333-444444444444",
+      "name": "db-main",
+      "slug": "db-main",
+      "attributes": {},
+      "scope": {
+        "id": "ffffffff-1111-2222-3333-444444444444",
+        "slug": "dev-scope",
+        "nrn": "organization=11111111:account=2097086864:namespace=55555555:application=777:scope=888"
+      },
+      "entity": {
+        "slug": "conciliation-api",
+        "nrn": "organization=11111111:account=2097086864:namespace=55555555:application=777"
+      }
+    },
+    "tags": {
+      "organization_id": "11111111",
+      "organization": "implementations",
+      "application": "conciliation-api",
+      "scope": "dev-scope"
+    },
+    "entity_nrn": "organization=11111111:account=2097086864:namespace=55555555:application=777"
+  }
+}

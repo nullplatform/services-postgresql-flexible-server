@@ -1,0 +1,29 @@
+#!/bin/bash
+# Test stub. Appends its argv to $TOFU_STUB_LOG and serves canned outputs.
+set -euo pipefail
+printf '%s\n' "tofu $*" >> "${TOFU_STUB_LOG:?TOFU_STUB_LOG must be set}"
+
+if [ "${1:-}" = "output" ]; then
+  if [ "${TOFU_STUB_FAIL_OUTPUT:-}" = "true" ]; then
+    echo "stub tofu: simulated 'tofu output' failure (state locked, backend error, etc.)" >&2
+    exit 1
+  fi
+
+  if [ "${2:-}" = "-json" ]; then
+    # Build {"<name>": {"value": "<val>"}, ...} from every TOFU_STUB_OUTPUT_*
+    # env var the caller exported, including ones set to an empty string.
+    json='{}'
+    while IFS='=' read -r key val; do
+      [ -n "$key" ] || continue
+      name="${key#TOFU_STUB_OUTPUT_}"
+      json=$(jq -nc --argjson base "$json" --arg k "$name" --arg v "$val" '$base + {($k): {value: $v}}')
+    done < <(env | grep '^TOFU_STUB_OUTPUT_' || true)
+    printf '%s' "$json"
+    exit 0
+  fi
+
+  # Args look like: output -raw <name>
+  name="${!#}"
+  var="TOFU_STUB_OUTPUT_${name}"
+  printf '%s' "${!var:-}"
+fi

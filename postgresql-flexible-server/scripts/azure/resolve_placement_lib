@@ -1,0 +1,151 @@
+#!/bin/bash
+# Sourceable library of PURE helpers for resolving WHERE this service puts
+# things: the target resource group and location, and the tfstate location.
+# Makes NO np/az calls and has no source side effects — fully unit-testable.
+#
+# Requires (at call time): jq.
+#
+# ---------------------------------------------------------------------------
+# Why these values have three sources
+#
+# The reference aws-s3-bucket service needs none of this: it reads its region
+# from a nullplatform provider (account.region) and CREATES its own tfstate
+# bucket at runtime. Azure cannot copy either half cheaply — there is no
+# account.location equivalent, and a storage account is globally-named and slow
+# to create, so one per service is not an option.
+#
+# So placement is configuration, and it is resolved from the most
+# platform-native source available, in this order:
+#
+#   1. values.yaml   explicit, service-scoped, committed operator configuration
+#   2. provider      the cloud-providers config for this NRN + dimensions,
+#                    under a `services` block (see services_block below)
+#   3. environment   what the nullplatform agent already has in its pod
+#
+# Tier 2 is the one that matches how a customer actually operates: the values
+# live in nullplatform, next to the credentials, not in a file in this repo.
+# ---------------------------------------------------------------------------
+
+# first_non_empty <val>...
+# Echoes the first argument that is not the empty string. Echoes nothing when
+# they are all empty. This is the whole precedence mechanism — deliberately a
+# single function rather than nested ${a:-${b:-${c}}} chains, which is where
+# the credentials library previously grew a cross-assignment bug.
+first_non_empty() {
+  local v
+  for v in "$@"; do
+    if [ -n "$v" ]; then
+      printf '%s' "$v"
+      return 0
+    fi
+  done
+}
+
+# provider_field <provider_attributes_json> <jq_path>
+# Echoes a single string field, or empty. Never crashes on empty or malformed
+# input; a non-string (object, array, null) reads as empty rather than as
+# jq's rendering of it.
+provider_field() {
+  local json="${1:-}" path="${2:-}"
+  [ -z "$json" ] && return 0
+  [ -z "$path" ] && return 0
+  printf '%s' "$json" \
+    | jq -r --arg p "$path" 'getpath($p | split(".")) | if type == "string" then . else "" end' 2>/dev/null \
+    || true
+}
+
+# The `services` block this service looks for inside the cloud-providers
+# attributes. tofu-modules' nullplatform/cloud/azure/cloud does not emit it
+# (its attributes are `authentication` and `networking` only), so an operator
+# who wants tier 2 publishes it with a nullplatform_provider_config of their
+# own. Shape:
+#
+#   {
+#     "services": {
+#       "resource_group_name": "rg-np-services",
+#       "location": "eastus",
+#       "tfstate": {
+#         "storage_account":     "nptfstate01",
+#         "container":           "tfstate",
+#         "resource_group_name": "rg-np-platform"
+#       }
+#     }
+#   }
+
+placement_resource_group() {
+  local provider_json="${1:-}" from_values="${2:-}"
+  # RESOURCE_GROUP is what tofu-modules' nullplatform/agent injects into the
+  # agent pod for cloud_provider = "azure" (verified at v7.7.0). Reading it is
+  # what lets a stock agent need no placement configuration at all.
+  first_non_empty \
+    "$from_values" \
+    "$(provider_field "$provider_json" "services.resource_group_name")" \
+    "${SERVICES_RESOURCE_GROUP:-}" \
+    "${RESOURCE_GROUP:-}"
+}
+
+# Empty is a valid result: the deployment module falls back to the resource
+# group's own location via a data source, so an unset location is not an error.
+placement_location() {
+  local provider_json="${1:-}" from_values="${2:-}"
+  first_non_empty \
+    "$from_values" \
+    "$(provider_field "$provider_json" "services.location")" \
+    "${SERVICES_LOCATION:-}"
+}
+
+placement_tfstate_storage_account() {
+  local provider_json="${1:-}" from_values="${2:-}"
+  first_non_empty \
+    "$from_values" \
+    "$(provider_field "$provider_json" "services.tfstate.storage_account")" \
+    "${AZURE_TFSTATE_STORAGE_ACCOUNT:-}"
+}
+
+placement_tfstate_container() {
+  local provider_json="${1:-}" from_values="${2:-}"
+  first_non_empty \
+    "$from_values" \
+    "$(provider_field "$provider_json" "services.tfstate.container")" \
+    "${AZURE_TFSTATE_CONTAINER:-}"
+}
+
+# Defaults to the target resource group, which is the common single-RG setup.
+placement_tfstate_resource_group() {
+  local provider_json="${1:-}" from_values="${2:-}" target_rg="${3:-}"
+  first_non_empty \
+    "$from_values" \
+    "$(provider_field "$provider_json" "services.tfstate.resource_group_name")" \
+    "${AZURE_TFSTATE_RESOURCE_GROUP:-}" \
+    "$target_rg"
+}
+
+# placement_source <values_val> <provider_val> <env_val>
+# Echoes which tier supplied a value, for logging. Never echoes the value.
+placement_source() {
+  local v="${1:-}" p="${2:-}" e="${3:-}"
+  if   [ -n "$v" ]; then printf 'values.yaml'
+  elif [ -n "$p" ]; then printf 'provider'
+  elif [ -n "$e" ]; then printf 'agent-environment'
+  else printf 'unset'
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Server firewall (this service only)
+#
+# values.yaml `allowed_ips` -> provider .services.postgresql.allowed_ips (a
+# JSON array or a comma-separated string) -> $SERVICES_PG_ALLOWED_IPS.
+# Echoes a comma-separated list, possibly empty: build_context validates and
+# splits it.
+# ---------------------------------------------------------------------------
+placement_allowed_ips() {
+  local provider_json="$1" values_ips="$2"
+  local provider_ips
+  provider_ips=$(printf '%s' "$provider_json" | jq -r '
+    (.services.postgresql.allowed_ips // empty)
+    | if type == "array" then map(tostring) | join(",")
+      elif type == "string" then .
+      else empty end' 2>/dev/null) || provider_ips=""
+  first_non_empty "$values_ips" "$provider_ips" "${SERVICES_PG_ALLOWED_IPS:-}"
+}

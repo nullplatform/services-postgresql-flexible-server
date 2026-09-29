@@ -1,0 +1,55 @@
+# Destroys the Flexible Server.
+#
+# The tfstate blobs (the server's and every link's) are deliberately left
+# behind: removing them would need an `az` binary the worker image does not
+# carry, and an orphaned few-KB blob is a far smaller problem than a delete
+# action that cannot complete. Clean the postgresql-flexible-server/<service_id>/
+# prefix out of band if it ever matters.
+#
+# DESTRUCTIVE: deleting the server deletes the database, every role and all
+# their data. Azure keeps the automated backups for the retention period only
+# while the server exists; there is no final snapshot.
+provider_categories:
+  - cloud-providers
+
+steps:
+  - name: resolve azure credentials
+    type: script
+    file: $SERVICE_PATH/scripts/azure/resolve_azure_credentials
+    output:
+      - name: ARM_SUBSCRIPTION_ID
+        type: environment
+      - name: ARM_CLIENT_ID
+        type: environment
+      - name: ARM_TENANT_ID
+        type: environment
+      # Empty when the agent uses a managed identity.
+      - name: ARM_CLIENT_SECRET
+        type: environment
+
+  - name: build context
+    type: script
+    file: $SERVICE_PATH/scripts/azure/build_context
+    output:
+      - name: OUTPUT_DIR
+        type: environment
+      - name: TOFU_MODULE_DIR
+        type: environment
+      - name: TOFU_INIT_VARIABLES
+        type: environment
+      - name: TOFU_VARIABLES
+        type: environment
+      - name: TFSTATE_CONTAINER
+        type: environment
+      - name: TFSTATE_STORAGE_ACCOUNT
+        type: environment
+      - name: TFSTATE_RESOURCE_GROUP
+        type: environment
+      - name: TFSTATE_KEY
+        type: environment
+
+  - name: tofu
+    type: script
+    file: $SERVICE_PATH/scripts/azure/do_tofu
+    configuration:
+      TOFU_ACTION: destroy
