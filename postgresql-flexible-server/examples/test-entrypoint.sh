@@ -25,7 +25,7 @@ run_handler() {
 }
 
 echo "== service handler maps action type to workflow =="
-assert_contains "$(run_handler service create create-postgresql-flexible-server)" \
+assert_contains "$(run_handler service create create-azure-postgresql-flexible-server)" \
   "workflows/azure/create.yaml" "create -> create.yaml"
 assert_contains "$(run_handler service update update-postgresql-flexible-server)" \
   "workflows/azure/update.yaml" "update -> update.yaml"
@@ -43,7 +43,7 @@ assert_contains "$(run_handler link delete delete-connect)" \
   "workflows/azure/unlink.yaml" "delete -> unlink.yaml"
 
 echo "== handlers pass values.yaml =="
-assert_contains "$(run_handler service create create-postgresql-flexible-server)" \
+assert_contains "$(run_handler service create create-azure-postgresql-flexible-server)" \
   "--values" "values.yaml is passed to the engine"
 
 echo "== handlers reject an unsafe action name =="
@@ -61,7 +61,7 @@ BRIDGE=$(
   export NP_STUB_LOG="$(mktemp)"
   export NP_API_KEY="key.value"
   unset NULLPLATFORM_API_KEY
-  export NP_ACTION_CONTEXT="'"'{"notification":{"slug":"create-postgresql-flexible-server","type":"create","action":"service:action:create","link":null,"service":{"id":"svc-1"}}}'"'"
+  export NP_ACTION_CONTEXT="'"'{"notification":{"slug":"create-azure-postgresql-flexible-server","type":"create","action":"service:action:create","link":null,"service":{"id":"svc-1"}}}'"'"
   bash -c '
     source '"$SERVICE_PATH"'/entrypoint/entrypoint --service-path='"$SERVICE_PATH"' >/dev/null 2>&1
     echo "$NULLPLATFORM_API_KEY|$ACTION_SOURCE|$SERVICE_ACTION_TYPE|$SERVICE_PATH"

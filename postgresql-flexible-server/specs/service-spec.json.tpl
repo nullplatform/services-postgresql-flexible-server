@@ -1,6 +1,6 @@
 {
   "name": "Azure PostgreSQL Flexible Server",
-  "slug": "postgresql-flexible-server",
+  "slug": "azure-postgresql-flexible-server",
   "type": "dependency",
   "unique": false,
   "assignable_to": "any",

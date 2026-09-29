@@ -29,7 +29,7 @@ depends = ["build:image"]
 run = """
 set -eu
 : "${NP_API_KEY:?set NP_API_KEY}"
-slug="${NP_PACKAGE_SLUG:-postgresql-flexible-server}"
+slug="${NP_PACKAGE_SLUG:-azure-postgresql-flexible-server}"
 env_json='{}'
 [ -n "${NP_PACKAGE_ENV_JSON:-}" ] && env_json="$NP_PACKAGE_ENV_JSON"
 worker_rules='[{"match":{"package":"'"$slug"'"},"env":'"$env_json"'}]'

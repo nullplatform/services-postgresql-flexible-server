@@ -199,11 +199,11 @@ environment. In the [`nullplatform/agent`](https://github.com/nullplatform/tofu-
 module:
 
 ```hcl
-  worker_orchestrated_packages = ["postgresql-flexible-server"]
+  worker_orchestrated_packages = ["azure-postgresql-flexible-server"]
 
   worker = {
     patches = [{
-      target = { package = "postgresql-flexible-server" }
+      target = { package = "azure-postgresql-flexible-server" }
       merge = {
         spec = {
           containers = [{
@@ -355,7 +355,7 @@ tasks in `mise.toml` are the whole contract with the CLI:
 | `np package build --image` | `mise run build:image` | Builds `postgresql-flexible-server-worker:dev` |
 | `np package run` | `mise run run` | Builds the image, then starts the local agent |
 
-The agent is tagged `package:postgresql-flexible-server` and `local:<your user>`.
+The agent is tagged `package:azure-postgresql-flexible-server` and `local:<your user>`.
 It receives an action only when the service's notification channel selects
 those tags, so point a channel at `local:<your user>` to route work to your
 machine. **Never start a local agent with tags a production channel selects.**

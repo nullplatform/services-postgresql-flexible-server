@@ -32,6 +32,6 @@ RUN set -eu; \
 
 # Bake the service in and point the bridge at its entrypoint + service path.
 COPY . /app/pkg
-ENV NP_PACKAGE_NAME=postgresql-flexible-server \
+ENV NP_PACKAGE_NAME=azure-postgresql-flexible-server \
     NP_SERVICE_PATH=/app/pkg/postgresql-flexible-server \
     NP_SCOPE_ENTRYPOINT=/app/pkg/postgresql-flexible-server/entrypoint/entrypoint

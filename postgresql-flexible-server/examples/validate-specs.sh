@@ -26,7 +26,7 @@ assert_eq "absent" "$(jq -e 'has("specification_schema")' "$SERVICE_SPEC" >/dev/
 assert_eq "absent" "$(jq -e 'has("specification_schema")' "$LINK_SPEC" >/dev/null 2>&1 && echo present || echo absent)" "link has no specification_schema"
 
 echo "== identity and selectors =="
-assert_eq "postgresql-flexible-server" "$(jq -r '.slug' "$SERVICE_SPEC" 2>/dev/null)" "service slug"
+assert_eq "azure-postgresql-flexible-server" "$(jq -r '.slug' "$SERVICE_SPEC" 2>/dev/null)" "service slug"
 assert_eq "dependency" "$(jq -r '.type' "$SERVICE_SPEC" 2>/dev/null)" "service type"
 assert_eq "Azure" "$(jq -r '.selectors.provider' "$SERVICE_SPEC" 2>/dev/null)" "service provider selector"
 assert_eq "Database" "$(jq -r '.selectors.category' "$SERVICE_SPEC" 2>/dev/null)" "service category selector"
