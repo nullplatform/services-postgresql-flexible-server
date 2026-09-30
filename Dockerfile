@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # Worker image: the bridge runs the entrypoint on every action. Add the tools your steps need.
-FROM public.ecr.aws/nullplatform/scopes/worker-bridge:1.1.1
+FROM public.ecr.aws/nullplatform/scopes/worker-bridge:2.0.1
 
 # OpenTofu, pinned. Baking it here is the whole point of the OCI model: on the
 # git-clone path do_tofu curls a release tarball into /tmp on every action,
