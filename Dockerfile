@@ -10,7 +10,7 @@ FROM public.ecr.aws/nullplatform/scopes/worker-bridge:2.0.1
 #
 # Keep TOFU_VERSION in sync with .github/workflows/terraform.yml and with
 # do_tofu's fallback.
-ARG TOFU_VERSION=1.10.10
+ARG TOFU_VERSION=1.13.1
 
 # TARGETARCH is a BuildKit built-in and is EMPTY under the legacy builder.
 # Falling back to uname keeps a local verification build working.
