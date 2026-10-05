@@ -14,7 +14,7 @@ jobs:
           - postgresql-flexible-server/deployment
           - postgresql-flexible-server/permissions
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: opentofu/setup-opentofu@v1
         with:
           # Must match the Dockerfile's TOFU_VERSION and do_tofu's fallback, or
