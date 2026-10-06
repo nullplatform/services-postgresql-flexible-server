@@ -1,9 +1,5 @@
 # Trivy misconfiguration suppressions for this repo (intentional, documented).
 
-# AVD-DS-0002: the worker-bridge base runs as root; the runtime user is set by
-# the agent's worker pod securityContext, not by a USER directive here.
-AVD-DS-0002
-
 # AVD-AZU-0019 / AVD-AZU-0020 (PostgreSQL log_checkpoints / log_connections):
 # server parameters tuned for auditing are a v2 concern; the platform's own
 # logging integration is the intended path.
