@@ -39,6 +39,12 @@ ENV NP_PACKAGE_NAME=azure-postgresql-flexible-server \
     NP_SERVICE_PATH=/app/pkg/postgresql-flexible-server \
     NP_SCOPE_ENTRYPOINT=/app/pkg/postgresql-flexible-server/entrypoint/entrypoint
 
+# Hand HOME to the runtime user. The RUN steps above ran as root with HOME
+# already set to /home/app by the base, so tools invoked at build time left
+# root-owned config and cache dirs there (tofu: ~/.terraform.d, az: ~/.azure)
+# that the non-root user could not write to at runtime.
+RUN chown -R 10001:10001 /home/app
+
 # Drop root for the runtime. Everything above installs as root, as usual; the
 # base (worker-bridge 2.0.0+) ships the app user, np on PATH and a writable
 # HOME, and leaves the switch to each image. Numeric on purpose: k8s
