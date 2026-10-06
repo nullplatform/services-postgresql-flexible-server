@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.0](https://github.com/nullplatform/services-postgresql-flexible-server/compare/v1.0.3...v1.1.0) (2026-10-06)
+
+
+### Features
+
+* run the worker image as a non-root user ([28debb6](https://github.com/nullplatform/services-postgresql-flexible-server/commit/28debb603ca36f333f6fc85b570e4b42b9d1cfb9))
+* run the worker image as a non-root user ([43bf2bd](https://github.com/nullplatform/services-postgresql-flexible-server/commit/43bf2bd9d53b8f5448430b85af6752a8acd13391))
+
 ## [1.0.3](https://github.com/nullplatform/services-postgresql-flexible-server/compare/v1.0.2...v1.0.3) (2026-10-02)
 
 
