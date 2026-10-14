@@ -232,7 +232,7 @@ mounts.
 
 ```hcl
 module "service_definition_postgresql_flexible_server" {
-  source              = "git::https://github.com/nullplatform/tofu-modules.git//nullplatform/service_definition?ref=v8.0.0"
+  source              = "git::https://github.com/nullplatform/tofu-modules.git//nullplatform/service_definition?ref=v8.7.0"
   nrn                 = var.nrn
   service_path        = "postgresql-flexible-server"
   service_name        = "Azure PostgreSQL Flexible Server"
@@ -261,9 +261,8 @@ module "service_definition_postgresql_flexible_server" {
 
 ```hcl
 module "service_agent_association_postgresql_flexible_server" {
-  source                     = "git::https://github.com/nullplatform/tofu-modules.git//nullplatform/service_definition_agent_association?ref=v8.0.0"
+  source                     = "git::https://github.com/nullplatform/tofu-modules.git//nullplatform/service_definition_agent_association?ref=v8.7.0"
   nrn                        = var.nrn
-  api_key                    = var.np_api_key
   service_path               = "postgresql-flexible-server"
   service_specification_slug = module.service_definition_postgresql_flexible_server.service_specification_slug
   tags_selectors             = var.tags_selectors
@@ -272,6 +271,11 @@ module "service_agent_association_postgresql_flexible_server" {
   package_slug        = module.service_definition_postgresql_flexible_server.service_specification_slug
 }
 ```
+
+The association takes no `api_key` (tofu-modules v8.6.0 or later): nullplatform
+creates and manages the channel's credential, scoped to dispatching commands to
+agents. The identity running the apply must be able to assign the
+`controlplane:agent-dispatcher` role (`admin`, `ops` or `secops`).
 
 A ready-made version of pieces 2 and 3 lives in
 [`postgresql-flexible-server/specs/install/azure/`](postgresql-flexible-server/specs/install/azure)

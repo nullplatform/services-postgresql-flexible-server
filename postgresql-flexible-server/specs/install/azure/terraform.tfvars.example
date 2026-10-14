@@ -1,6 +1,5 @@
 # Namespace-level NRN, e.g. organization=<org>:account=<account>:namespace=<namespace>
 nrn        = ""
-np_api_key = ""
 
 # Ref of nullplatform/tofu-modules to source service_definition and
 # service_definition_agent_association from. No default is baked in here on
@@ -10,6 +9,8 @@ np_api_key = ""
 # also what `main` currently points at), with v6.x tags before it; there are
 # also a handful of unreleased fix/feat branches. Re-check before applying:
 #   git ls-remote --tags https://github.com/nullplatform/tofu-modules
+# It must be v8.6.0 or later: earlier versions require an API key for the
+# notification channel.
 tofu_modules_ref = ""
 
 repository_org  = "" # your GitHub org or user

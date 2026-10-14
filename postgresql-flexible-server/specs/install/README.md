@@ -18,6 +18,12 @@ decision. Before applying, check what currently exists:
 git ls-remote --tags https://github.com/nullplatform/tofu-modules
 ```
 
+It must be `v8.6.0` or later. From that version the agent association takes no
+API key: nullplatform creates and manages the notification channel's
+credential, scoped to dispatching commands to agents. The identity running the
+apply must be able to assign the `controlplane:agent-dispatcher` role (`admin`,
+`ops` or `secops`).
+
 As of this writing the newest tag is `v7.3.0` (identical to `main` at the same
 commit); do not assume this is still true, and do not reuse the ref another
 service's install pins (e.g. `services-postgresql-aurora` pins `v4.5.1`, which
@@ -101,7 +107,7 @@ without pushing anything.
 cp -r postgresql-flexible-server/specs/install/azure /path/to/your/infra/postgresql-flexible-server
 cd /path/to/your/infra/postgresql-flexible-server
 cp terraform.tfvars.example terraform.tfvars
-$EDITOR terraform.tfvars   # set nrn, np_api_key, tofu_modules_ref, tags_selectors,
+$EDITOR terraform.tfvars   # set nrn, tofu_modules_ref, tags_selectors,
                            # repository_branch, git_provider = "local",
                            # local_specs_path, base_clone_path
 
