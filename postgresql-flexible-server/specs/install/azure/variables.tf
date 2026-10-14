@@ -3,19 +3,13 @@ variable "nrn" {
   type        = string
 }
 
-variable "np_api_key" {
-  description = "nullplatform API key the agent association uses to authenticate. Maps onto the service_definition_agent_association module's `api_key` variable."
-  type        = string
-  sensitive   = true
-}
-
 variable "tags_selectors" {
   description = "Agent tag selectors for the notification channel. MUST match the tags the target agent registers with (np-agent -tags), or notifications are created but never routed to any agent."
   type        = map(string)
 }
 
 variable "tofu_modules_ref" {
-  description = "Ref of nullplatform/tofu-modules to source the registration modules from (e.g. a tag such as \"v7.3.0\"). No default on purpose: confirm the current ref against the repository before applying — these repos are mid-migration from release branches to tags, and a ref that worked for another service may not exist here."
+  description = "Ref of nullplatform/tofu-modules to source the registration modules from (e.g. a tag such as \"v8.7.0\"). Must be v8.6.0 or later: earlier versions require an api_key for the notification channel. No default on purpose: confirm the current ref against the repository before applying — these repos are mid-migration from release branches to tags, and a ref that worked for another service may not exist here."
   type        = string
 }
 
