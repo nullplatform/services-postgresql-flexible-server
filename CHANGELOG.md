@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.2](https://github.com/nullplatform/services-postgresql-flexible-server/compare/v1.1.1...v1.1.2) (2026-10-16)
+
+
+### Bug Fixes
+
+* **deps:** bump actions/checkout from 4 to 7 ([#13](https://github.com/nullplatform/services-postgresql-flexible-server/issues/13)) ([34b9bd0](https://github.com/nullplatform/services-postgresql-flexible-server/commit/34b9bd07efed7b4c194cb36569752e4411f2f8ab))
+
 ## [1.1.1](https://github.com/nullplatform/services-postgresql-flexible-server/compare/v1.1.0...v1.1.1) (2026-10-16)
 
 
