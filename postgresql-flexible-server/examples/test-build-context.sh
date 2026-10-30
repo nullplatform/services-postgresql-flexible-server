@@ -209,16 +209,6 @@ assert_eq "0" "$ALONE_RC" "version alone, other attributes unchanged, passes"
 update_with "$STORED" "$(echo "$STORED" | jq -c '.sku_name = "GP_Standard_D4s_v3"')" >/dev/null && SKU_RC=0 || SKU_RC=$?
 assert_eq "0" "$SKU_RC" "SKU alone, same version, passes"
 
-echo "== 17 is refused on a Burstable SKU, on create and on upgrade =="
-reject '{"postgres_version":"17","sku_name":"B_Standard_B1ms"}' "create 17 on B_ rejected"
-B_STORED=$(echo "$STORED" | jq -c '.sku_name = "B_Standard_B2s"')
-B_ERR=$(update_with "$B_STORED" "$(echo "$B_STORED" | jq -c '.postgres_version = "17"')") && B_RC=0 || B_RC=$?
-assert_eq "1" "$B_RC" "upgrade 16 -> 17 on B_ refused"
-assert_contains "$B_ERR" "not supported on a Burstable SKU" "error explains the SKU"
-B17=$(echo "$STORED" | jq -c '.postgres_version = "17" | .sku_name = "B_Standard_B2s"')
-update_with "$B17" "$(echo "$B17" | jq -c '.storage_mb = 65536')" >/dev/null && B17_RC=0 || B17_RC=$?
-assert_eq "0" "$B17_RC" "a server already on 17 + B_ keeps updating"
-
 echo "== no stored version on update leaves a WARN =="
 WARN_OUT=$(update_with '{"database_name":"conciliation"}' '{"database_name":"conciliation","postgres_version":"17"}') || true
 assert_contains "$WARN_OUT" "WARN: no numeric postgres_version stored" "the skipped check is logged"

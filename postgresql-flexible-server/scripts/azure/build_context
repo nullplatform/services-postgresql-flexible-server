@@ -147,17 +147,6 @@ if [[ ! "$SKU_NAME" =~ ^(B|GP|MO)_Standard_[A-Za-z0-9_]+$ ]]; then
   exit 1
 fi
 
-# PostgreSQL 17 on a Burstable (B_) SKU fails with an Azure InternalServerError
-# in some regions (seen in eastus2), and an upgrade that fails halfway is the
-# worst place to find out. Refused on create and on an upgrade to 17+; a server
-# already running 17 on B_ keeps updating normally.
-if [ "$SERVICE_WRITE" = "true" ] && [ "$POSTGRES_VERSION" -ge 17 ] && [[ "$SKU_NAME" == B_* ]] \
-  && { [ "$ACTION_TYPE" = "create" ] || [ "$POSTGRES_VERSION" != "$CURRENT_VERSION" ]; }; then
-  echo "ERROR: postgres_version ${POSTGRES_VERSION} is not supported on a Burstable SKU (${SKU_NAME})." >&2
-  echo "       Use a General Purpose SKU; on an existing server, change the SKU in its own update first." >&2
-  exit 1
-fi
-
 if [[ ! "$STORAGE_MB" =~ ^[0-9]+$ ]] || [ "$STORAGE_MB" -lt 32768 ]; then
   echo "ERROR: invalid storage_mb '${STORAGE_MB}' (expected an integer of at least 32768)" >&2
   exit 1
