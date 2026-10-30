@@ -3,6 +3,14 @@
 set -euo pipefail
 printf '%s\n' "tofu $*" >> "${TOFU_STUB_LOG:?TOFU_STUB_LOG must be set}"
 
+# show -json <planfile>: the plan do_tofu checks before applying. Defaults to
+# a plan with no changes; TOFU_STUB_PLAN_JSON overrides it.
+if [ "${1:-}" = "show" ]; then
+  empty_plan='{"resource_changes":[]}'
+  printf '%s' "${TOFU_STUB_PLAN_JSON:-$empty_plan}"
+  exit 0
+fi
+
 if [ "${1:-}" = "output" ]; then
   if [ "${TOFU_STUB_FAIL_OUTPUT:-}" = "true" ]; then
     echo "stub tofu: simulated 'tofu output' failure (state locked, backend error, etc.)" >&2

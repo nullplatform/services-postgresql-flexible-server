@@ -127,6 +127,21 @@ if [[ ! "$POSTGRES_VERSION" =~ ^(16|17)$ ]]; then
   exit 1
 fi
 
+# A major version can only go up. azurerm forces a NEW server for a lower
+# version, which destroys the server and every database in it: refuse it here
+# with a clear message. do_tofu repeats the check on the plan itself, since
+# this one only sees what the notification carries as the current version.
+CURRENT_VERSION=$(echo "$CONTEXT" | jq -r '.service.attributes.postgres_version // ""')
+if [ "$SERVICE_WRITE" = "true" ] && [ "$ACTION_TYPE" = "update" ] && [[ ! "$CURRENT_VERSION" =~ ^[0-9]+$ ]]; then
+  echo "WARN: no numeric postgres_version stored for this service ('${CURRENT_VERSION}'); skipping the downgrade check here, do_tofu still refuses a plan that replaces the server." >&2
+fi
+if [ "$SERVICE_WRITE" = "true" ] && [[ "$CURRENT_VERSION" =~ ^[0-9]+$ ]] \
+  && [ "$POSTGRES_VERSION" -lt "$CURRENT_VERSION" ]; then
+  echo "ERROR: postgres_version cannot go down from ${CURRENT_VERSION} to ${POSTGRES_VERSION}" >&2
+  echo "       A major version upgrade is irreversible; a lower version would recreate the server and lose its data." >&2
+  exit 1
+fi
+
 if [[ ! "$SKU_NAME" =~ ^(B|GP|MO)_Standard_[A-Za-z0-9_]+$ ]]; then
   echo "ERROR: invalid sku_name '${SKU_NAME}' (expected B_Standard_B1ms, GP_Standard_D2s_v3, ...)" >&2
   exit 1
@@ -145,6 +160,28 @@ fi
 if [[ ! "$HIGH_AVAILABILITY" =~ ^(true|false)$ ]]; then
   echo "ERROR: invalid high_availability '${HIGH_AVAILABILITY}' (expected true or false)" >&2
   exit 1
+fi
+
+# A major version upgrade runs on its own: combined with a compute, storage,
+# backup or HA change it becomes one Azure operation nobody has tested, and a
+# failure halfway leaves it unclear which part applied. Only attributes the
+# service already stores are compared, so a first create is never affected.
+if [ "$SERVICE_WRITE" = "true" ] && [ "$ACTION_TYPE" = "update" ] \
+  && [[ "$CURRENT_VERSION" =~ ^[0-9]+$ ]] && [ "$POSTGRES_VERSION" != "$CURRENT_VERSION" ]; then
+  CHANGED_WITH_VERSION=$(jq -rn \
+    --argjson stored "$(echo "$CONTEXT" | jq -c '.service.attributes // {}')" \
+    --arg sku_name "$SKU_NAME" \
+    --arg storage_mb "$STORAGE_MB" \
+    --arg backup_retention_days "$BACKUP_RETENTION_DAYS" \
+    --arg high_availability "$HIGH_AVAILABILITY" \
+    '$ARGS.named | del(.stored) | to_entries
+     | map(select($stored[.key] != null and ($stored[.key] | tostring) != .value) | .key)
+     | join(", ")')
+  if [ -n "$CHANGED_WITH_VERSION" ]; then
+    echo "ERROR: postgres_version changes from ${CURRENT_VERSION} to ${POSTGRES_VERSION} together with: ${CHANGED_WITH_VERSION}" >&2
+    echo "       Run the major version upgrade in its own update, then change the rest." >&2
+    exit 1
+  fi
 fi
 
 # --- Azure placement -------------------------------------------------------
@@ -307,6 +344,18 @@ export SERVICE_ID SERVICE_NAME SERVER_NAME DATABASE_NAME
 export RESOURCE_GROUP_NAME LOCATION ALLOWED_IPS
 export TFSTATE_STORAGE_ACCOUNT TFSTATE_RESOURCE_GROUP TFSTATE_CONTAINER TFSTATE_KEY
 export OUTPUT_DIR TOFU_MODULE_DIR TOFU_INIT_VARIABLES TOFU_VARIABLES
+
+# Resource types do_tofu must never see destroyed by an apply. Set for service
+# actions only: link actions run the permissions/ module, whose roles are
+# meant to be replaced, and keep do_tofu's plain apply.
+# SC2089/SC2090: the value is a JSON array for jq, never word-split as argv.
+TOFU_PROTECTED_TYPES=""
+if [ "${ACTION_SOURCE:-service}" = "service" ]; then
+  # shellcheck disable=SC2089
+  TOFU_PROTECTED_TYPES='["azurerm_postgresql_flexible_server","azurerm_postgresql_flexible_server_database"]'
+fi
+# shellcheck disable=SC2090
+export TOFU_PROTECTED_TYPES
 
 # --- Link context (link workflows only) ------------------------------------
 # Consumed by build_permissions_context in the next step. Every field comes

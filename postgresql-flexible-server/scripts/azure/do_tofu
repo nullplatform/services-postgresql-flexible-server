@@ -6,15 +6,23 @@ set -euo pipefail
 #
 # Generic: contains no Azure-specific or resource-specific logic, and is
 # shared by service actions (deployment/) and link actions (permissions/).
+# The resource types to protect come from the caller (TOFU_PROTECTED_TYPES).
 #
 # Expected environment (set by build_context or build_permissions_context):
 #   OUTPUT_DIR          — isolated working directory for this execution
 #   TOFU_MODULE_DIR     — module to run (deployment/ or permissions/)
 #   OUTPUT_DIR/backend.hcl — backend settings, written as a FILE (not flags)
 #   TOFU_VARIABLES      — a JSON object written to terraform.tfvars.json
+#   TOFU_PROTECTED_TYPES — optional JSON array of resource types an apply must
+#                         never destroy (build_context sets it for service
+#                         actions only)
 #
 # Set by the workflow YAML configuration block:
 #   TOFU_ACTION         — "apply" (default) or "destroy"
+#
+# With TOFU_PROTECTED_TYPES set, "apply" runs as plan + check + apply of that
+# plan, and refuses any plan that destroys one of those types (see the end of
+# this script). Without it, apply runs directly.
 # ---------------------------------------------------------------------------
 
 TOFU_ACTION="${TOFU_ACTION:-apply}"
@@ -139,5 +147,36 @@ else
   exit 1
 fi
 
-echo "Running: tofu ${TOFU_ACTION}"
-tofu "$TOFU_ACTION" -auto-approve -var-file=terraform.tfvars.json
+if [ "$TOFU_ACTION" != "apply" ] || [ -z "${TOFU_PROTECTED_TYPES:-}" ]; then
+  echo "Running: tofu ${TOFU_ACTION}"
+  tofu "$TOFU_ACTION" -auto-approve -var-file=terraform.tfvars.json
+  exit 0
+fi
+
+# An apply never destroys the server or its database. On azurerm a ForceNew
+# change is how that happens without anyone asking for it: a lower `version`
+# (build_context refuses it too, but only from what the notification says),
+# or any other attribute that cannot change in place. The plan is the one
+# place that shows it for certain, so apply exactly the plan that was checked.
+# The saved plan holds every value in clear text, the admin password included:
+# it never outlives this script.
+trap 'rm -f tfplan' EXIT
+
+echo "Running: tofu plan"
+tofu plan -input=false -out=tfplan -var-file=terraform.tfvars.json
+
+DESTROYED=$(tofu show -json tfplan | jq -r --argjson types "$TOFU_PROTECTED_TYPES" '
+  [.resource_changes[]?
+    | select(.type as $t | $types | index($t))
+    | select(.change.actions | index("delete"))
+    | .address]
+  | join(", ")')
+
+if [ -n "$DESTROYED" ]; then
+  echo "ERROR: refusing to apply: the plan destroys ${DESTROYED}." >&2
+  echo "       Most likely an attribute that cannot change in place (a lower postgres_version, for one)." >&2
+  exit 1
+fi
+
+echo "Running: tofu apply"
+tofu apply -auto-approve -input=false tfplan
