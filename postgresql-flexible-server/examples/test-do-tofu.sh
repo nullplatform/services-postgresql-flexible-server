@@ -124,6 +124,14 @@ plan_with() {
     '{resource_changes: [{address: ($t + ".x"), type: $t, change: {actions: $a}}]}'
 }
 
+echo "== without TOFU_PROTECTED_TYPES (link actions) apply runs directly =="
+: > "$TMP/tofu.log"
+run_do_tofu apply
+assert_eq "0" "$(grep -c "^tofu plan" "$TMP/tofu.log" || true)" "no plan without protected types"
+assert_contains "$(cat "$TMP/tofu.log")" "apply -auto-approve -var-file=terraform.tfvars.json" "plain apply"
+
+export TOFU_PROTECTED_TYPES='["azurerm_postgresql_flexible_server","azurerm_postgresql_flexible_server_database"]'
+
 echo "== apply checks a saved plan, then applies exactly that plan =="
 : > "$TMP/tofu.log"
 run_do_tofu apply
@@ -131,6 +139,7 @@ LOG=$(cat "$TMP/tofu.log")
 assert_contains "$LOG" "plan -input=false -out=tfplan -var-file=terraform.tfvars.json" "plans into a file first"
 assert_contains "$LOG" "show -json tfplan" "reads the saved plan"
 assert_contains "$LOG" "apply -auto-approve -input=false tfplan" "applies the saved plan, not a fresh one"
+assert_eq "absent" "$([ -e "$TMP/out/tfplan" ] && echo present || echo absent)" "the saved plan (secrets in clear text) is removed"
 
 echo "== an in-place version upgrade is applied =="
 : > "$TMP/tofu.log"
@@ -166,6 +175,6 @@ TOFU_STUB_PLAN_JSON=$(plan_with azurerm_postgresql_flexible_server '["delete"]')
 run_do_tofu destroy && RC=0 || RC=$?
 assert_eq "0" "$RC" "destroy still runs"
 assert_eq "0" "$(grep -c "^tofu plan" "$TMP/tofu.log" || true)" "no plan on destroy"
-unset TOFU_STUB_PLAN_JSON
+unset TOFU_STUB_PLAN_JSON TOFU_PROTECTED_TYPES
 
 finish_tests

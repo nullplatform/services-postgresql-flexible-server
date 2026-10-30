@@ -6,7 +6,7 @@ terraform {
       source = "hashicorp/azurerm"
       # 4.46+ accepts version "17" on azurerm_postgresql_flexible_server, and
       # 4.27+ forces a new server on a lower version (do_tofu refuses that plan).
-      version = "~> 4.30"
+      version = "~> 4.46"
     }
     random = {
       source  = "hashicorp/random"
