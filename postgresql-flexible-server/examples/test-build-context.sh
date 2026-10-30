@@ -107,14 +107,14 @@ MERGED=$(
   export PATH="$SCRIPT_DIR/stub-bin:$PATH" AZ_STUB_LOG="$TMP/az2.log" NP_STUB_LOG="$TMP/np2.log"
   CONTEXT=$(jq '.notification
     | .service.attributes = {"database_name":"conciliation","sku_name":"GP_Standard_D2s_v3","backup_retention_days":35}
-    | .parameters = {"sku_name":"B_Standard_B2s"}' "$SCRIPT_DIR/create.json")
+    | .parameters = {"sku_name":"GP_Standard_D4s_v3"}' "$SCRIPT_DIR/create.json")
   export CONTEXT
   export LINK=null SERVICE_PATH VALUES="$TMP/values.yaml" ACTION_SOURCE=service
   # shellcheck source=/dev/null
   source "$SERVICE_PATH/scripts/azure/build_context" >/dev/null 2>&1
   printf '%s' "$TOFU_VARIABLES"
 )
-assert_eq "B_Standard_B2s" "$(printf '%s' "$MERGED" | jq -r '.sku_name')" "parameter beats stored attribute"
+assert_eq "GP_Standard_D4s_v3" "$(printf '%s' "$MERGED" | jq -r '.sku_name')" "parameter beats stored attribute"
 assert_eq "35" "$(printf '%s' "$MERGED" | jq -r '.backup_retention_days')" "stored attribute used when no parameter"
 
 echo "== a stored server_name is stable and wins over a changed .service.name =="
@@ -163,7 +163,7 @@ update_version() {
     export PATH="$SCRIPT_DIR/stub-bin:$PATH" AZ_STUB_LOG="$TMP/az-upg.log" NP_STUB_LOG="$TMP/np-upg.log"
     CONTEXT=$(jq --arg cur "$1" --arg new "$2" '.notification
       | .type = "update" | .action = "service:action:update"
-      | .service.attributes = {"database_name":"conciliation","server_name":"conciliation-db-9f8e7d6c","postgres_version":$cur}
+      | .service.attributes = {"database_name":"conciliation","server_name":"conciliation-db-9f8e7d6c","postgres_version":$cur,"sku_name":"GP_Standard_D2s_v3"}
       | .parameters = {"postgres_version":$new}' "$SCRIPT_DIR/create.json")
     export CONTEXT LINK=null SERVICE_PATH VALUES="$TMP/values.yaml" ACTION_SOURCE=service
     # shellcheck source=/dev/null
@@ -208,6 +208,16 @@ update_with "$STORED" "$(echo "$STORED" | jq -c '.postgres_version = "17"')" >/d
 assert_eq "0" "$ALONE_RC" "version alone, other attributes unchanged, passes"
 update_with "$STORED" "$(echo "$STORED" | jq -c '.sku_name = "GP_Standard_D4s_v3"')" >/dev/null && SKU_RC=0 || SKU_RC=$?
 assert_eq "0" "$SKU_RC" "SKU alone, same version, passes"
+
+echo "== 17 is refused on a Burstable SKU, on create and on upgrade =="
+reject '{"postgres_version":"17","sku_name":"B_Standard_B1ms"}' "create 17 on B_ rejected"
+B_STORED=$(echo "$STORED" | jq -c '.sku_name = "B_Standard_B2s"')
+B_ERR=$(update_with "$B_STORED" "$(echo "$B_STORED" | jq -c '.postgres_version = "17"')") && B_RC=0 || B_RC=$?
+assert_eq "1" "$B_RC" "upgrade 16 -> 17 on B_ refused"
+assert_contains "$B_ERR" "not supported on a Burstable SKU" "error explains the SKU"
+B17=$(echo "$STORED" | jq -c '.postgres_version = "17" | .sku_name = "B_Standard_B2s"')
+update_with "$B17" "$(echo "$B17" | jq -c '.storage_mb = 65536')" >/dev/null && B17_RC=0 || B17_RC=$?
+assert_eq "0" "$B17_RC" "a server already on 17 + B_ keeps updating"
 
 echo "== no stored version on update leaves a WARN =="
 WARN_OUT=$(update_with '{"database_name":"conciliation"}' '{"database_name":"conciliation","postgres_version":"17"}') || true

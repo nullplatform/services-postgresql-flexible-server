@@ -92,7 +92,7 @@
           "title": "PostgreSQL Version",
           "default": "16",
           "enum": ["16", "17"],
-          "description": "Major version. Can be raised on update: an in-place upgrade that is irreversible and takes the server offline while it runs. It can never be lowered. 17 on a Burstable (B_) SKU fails with an Azure InternalServerError in some regions (seen in eastus2); pair 17 with a General Purpose SKU.",
+          "description": "Major version. Can be raised on update: an in-place upgrade that is irreversible and takes the server offline while it runs. It can never be lowered, and it changes in its own update. 17 needs a General Purpose (GP_) SKU: on Burstable it fails with an Azure InternalServerError in some regions, so the service refuses it.",
           "editableOn": ["create", "update"],
           "order": 2
         },
