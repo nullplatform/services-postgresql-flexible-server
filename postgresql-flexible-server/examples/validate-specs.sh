@@ -43,9 +43,12 @@ echo "== the service required array is exactly the one input with no safe defaul
 assert_eq "database_name" "$(jq -r '.attributes.schema.required | join(",")' "$SERVICE_SPEC" 2>/dev/null)" "service required array"
 
 echo "== immutable inputs are editable on create only =="
-for a in database_name postgres_version; do
+for a in database_name; do
   assert_eq "create" "$(jq -r --arg a "$a" '.attributes.schema.properties[$a].editableOn | join(",")' "$SERVICE_SPEC" 2>/dev/null)" "$a editable on create only"
 done
+
+echo "== postgres_version can be raised on update (build_context and do_tofu refuse a downgrade) =="
+assert_eq "create,update" "$(jq -r '.attributes.schema.properties.postgres_version.editableOn | join(",")' "$SERVICE_SPEC" 2>/dev/null)" "postgres_version editable on create and update"
 
 echo "== output attributes are not editable =="
 for a in hostname port server_name server_id resource_group_name; do

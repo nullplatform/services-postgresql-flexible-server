@@ -92,8 +92,8 @@
           "title": "PostgreSQL Version",
           "default": "16",
           "enum": ["16", "17"],
-          "description": "Major version. Cannot be changed after creation: an in-place major upgrade is an Azure operation outside this service. 17 on a Burstable (B_) SKU fails with an Azure InternalServerError in some regions (seen in eastus2); pair 17 with a General Purpose SKU.",
-          "editableOn": ["create"],
+          "description": "Major version. Can be raised on update: an in-place upgrade that is irreversible and takes the server offline while it runs. It can never be lowered. 17 on a Burstable (B_) SKU fails with an Azure InternalServerError in some regions (seen in eastus2); pair 17 with a General Purpose SKU.",
+          "editableOn": ["create", "update"],
           "order": 2
         },
         "sku_name": {

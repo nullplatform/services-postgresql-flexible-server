@@ -1,6 +1,8 @@
-# Applies attribute changes (SKU, storage, backup retention, high
-# availability, firewall) to an existing server, then refreshes the service
-# attributes. Same shape as create.yaml: tofu apply is idempotent.
+# Applies attribute changes (PostgreSQL major version, upgrade only; SKU,
+# storage, backup retention, high availability, firewall) to an existing
+# server, then refreshes the service attributes. Same shape as create.yaml:
+# tofu apply is idempotent, and do_tofu refuses a plan that destroys the
+# server or its database.
 provider_categories:
   - cloud-providers
 

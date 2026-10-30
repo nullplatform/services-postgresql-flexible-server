@@ -15,6 +15,9 @@ set -euo pipefail
 #
 # Set by the workflow YAML configuration block:
 #   TOFU_ACTION         — "apply" (default) or "destroy"
+#
+# "apply" runs as plan + check + apply of that plan: it refuses any plan that
+# destroys the server or its database (see the end of this script).
 # ---------------------------------------------------------------------------
 
 TOFU_ACTION="${TOFU_ACTION:-apply}"
@@ -139,5 +142,34 @@ else
   exit 1
 fi
 
-echo "Running: tofu ${TOFU_ACTION}"
-tofu "$TOFU_ACTION" -auto-approve -var-file=terraform.tfvars.json
+if [ "$TOFU_ACTION" != "apply" ]; then
+  echo "Running: tofu ${TOFU_ACTION}"
+  tofu "$TOFU_ACTION" -auto-approve -var-file=terraform.tfvars.json
+  exit 0
+fi
+
+# An apply never destroys the server or its database. On azurerm a ForceNew
+# change is how that happens without anyone asking for it: a lower `version`
+# (build_context refuses it too, but only from what the notification says),
+# or any other attribute that cannot change in place. The plan is the one
+# place that shows it for certain, so apply exactly the plan that was checked.
+PROTECTED_TYPES='["azurerm_postgresql_flexible_server","azurerm_postgresql_flexible_server_database"]'
+
+echo "Running: tofu plan"
+tofu plan -input=false -out=tfplan -var-file=terraform.tfvars.json
+
+DESTROYED=$(tofu show -json tfplan | jq -r --argjson types "$PROTECTED_TYPES" '
+  [.resource_changes[]?
+    | select(.type as $t | $types | index($t))
+    | select(.change.actions | index("delete"))
+    | .address]
+  | join(", ")')
+
+if [ -n "$DESTROYED" ]; then
+  echo "ERROR: refusing to apply: the plan destroys ${DESTROYED}." >&2
+  echo "       Most likely an attribute that cannot change in place (a lower postgres_version, for one)." >&2
+  exit 1
+fi
+
+echo "Running: tofu apply"
+tofu apply -auto-approve -input=false tfplan

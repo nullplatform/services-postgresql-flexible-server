@@ -155,6 +155,37 @@ reject '{"storage_mb":1024}'                       "storage_mb below the Azure m
 reject '{"backup_retention_days":99}'              "out-of-range backup_retention_days rejected"
 reject '{"high_availability":"maybe"}'             "non-boolean high_availability rejected"
 
+echo "== postgres_version can go up on update, never down =="
+# update_version <current> <requested> — runs build_context for an update and
+# prints the postgres_version it hands to tofu; fails when build_context does.
+update_version() {
+  (
+    export PATH="$SCRIPT_DIR/stub-bin:$PATH" AZ_STUB_LOG="$TMP/az-upg.log" NP_STUB_LOG="$TMP/np-upg.log"
+    CONTEXT=$(jq --arg cur "$1" --arg new "$2" '.notification
+      | .type = "update" | .action = "service:action:update"
+      | .service.attributes = {"database_name":"conciliation","server_name":"conciliation-db-9f8e7d6c","postgres_version":$cur}
+      | .parameters = {"postgres_version":$new}' "$SCRIPT_DIR/create.json")
+    export CONTEXT LINK=null SERVICE_PATH VALUES="$TMP/values.yaml" ACTION_SOURCE=service
+    # shellcheck source=/dev/null
+    source "$SERVICE_PATH/scripts/azure/build_context" >/dev/null 2>&1
+    printf '%s' "$TOFU_VARIABLES" | jq -r '.postgres_version'
+  )
+}
+assert_eq "17" "$(update_version 16 17 || echo failed)" "16 -> 17 is passed to tofu"
+assert_eq "17" "$(update_version 17 17 || echo failed)" "an update that keeps 17 passes"
+DOWN_ERR=$(
+  export PATH="$SCRIPT_DIR/stub-bin:$PATH" AZ_STUB_LOG="$TMP/az-down.log" NP_STUB_LOG="$TMP/np-down.log"
+  CONTEXT=$(jq '.notification
+    | .type = "update"
+    | .service.attributes = {"database_name":"conciliation","postgres_version":"17"}
+    | .parameters = {"postgres_version":"16"}' "$SCRIPT_DIR/create.json")
+  export CONTEXT LINK=null SERVICE_PATH VALUES="$TMP/values.yaml" ACTION_SOURCE=service
+  # shellcheck source=/dev/null
+  source "$SERVICE_PATH/scripts/azure/build_context" 2>&1
+) && DOWN_RC=0 || DOWN_RC=$?
+assert_eq "1" "$DOWN_RC" "17 -> 16 is refused before tofu"
+assert_contains "$DOWN_ERR" "cannot go down from 17 to 16" "error names both versions"
+
 echo "== database_name is required on create =="
 reject '{"database_name":""}' "empty database_name rejected on create"
 

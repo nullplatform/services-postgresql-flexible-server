@@ -118,4 +118,54 @@ echo "== sin backend.hcl falla fuerte, sin correr tofu =="
 assert_eq "1" "$RC" "do_tofu falla cuando falta backend.hcl"
 assert_eq "0" "$(grep -c "apply" "$TMP/tofu.log" || true)" "nunca llega a tofu apply sin backend"
 
+# plan_with <type> <actions JSON> — a one-resource plan, as `tofu show -json` prints it.
+plan_with() {
+  jq -nc --arg t "$1" --argjson a "$2" \
+    '{resource_changes: [{address: ($t + ".x"), type: $t, change: {actions: $a}}]}'
+}
+
+echo "== apply checks a saved plan, then applies exactly that plan =="
+: > "$TMP/tofu.log"
+run_do_tofu apply
+LOG=$(cat "$TMP/tofu.log")
+assert_contains "$LOG" "plan -input=false -out=tfplan -var-file=terraform.tfvars.json" "plans into a file first"
+assert_contains "$LOG" "show -json tfplan" "reads the saved plan"
+assert_contains "$LOG" "apply -auto-approve -input=false tfplan" "applies the saved plan, not a fresh one"
+
+echo "== an in-place version upgrade is applied =="
+: > "$TMP/tofu.log"
+export TOFU_STUB_PLAN_JSON
+TOFU_STUB_PLAN_JSON=$(plan_with azurerm_postgresql_flexible_server '["update"]')
+run_do_tofu apply && RC=0 || RC=$?
+assert_eq "0" "$RC" "an update-in-place plan on the server passes"
+assert_contains "$(cat "$TMP/tofu.log")" "apply -auto-approve -input=false tfplan" "and is applied"
+
+echo "== a plan that replaces the server is refused (a lower postgres_version on azurerm) =="
+: > "$TMP/tofu.log"
+TOFU_STUB_PLAN_JSON=$(plan_with azurerm_postgresql_flexible_server '["delete","create"]')
+run_do_tofu apply && RC=0 || RC=$?
+assert_eq "1" "$RC" "do_tofu fails when the plan replaces the server"
+assert_eq "0" "$(grep -c "^tofu apply" "$TMP/tofu.log" || true)" "tofu apply never runs"
+
+echo "== a plan that destroys the database is refused =="
+: > "$TMP/tofu.log"
+TOFU_STUB_PLAN_JSON=$(plan_with azurerm_postgresql_flexible_server_database '["delete"]')
+run_do_tofu apply && RC=0 || RC=$?
+assert_eq "1" "$RC" "do_tofu fails when the plan destroys the database"
+assert_eq "0" "$(grep -c "^tofu apply" "$TMP/tofu.log" || true)" "tofu apply never runs"
+
+echo "== replacing an unprotected resource (a firewall rule) is still applied =="
+: > "$TMP/tofu.log"
+TOFU_STUB_PLAN_JSON=$(plan_with azurerm_postgresql_flexible_server_firewall_rule '["delete","create"]')
+run_do_tofu apply && RC=0 || RC=$?
+assert_eq "0" "$RC" "a firewall rule replacement passes"
+
+echo "== destroy is not routed through the plan check =="
+: > "$TMP/tofu.log"
+TOFU_STUB_PLAN_JSON=$(plan_with azurerm_postgresql_flexible_server '["delete"]')
+run_do_tofu destroy && RC=0 || RC=$?
+assert_eq "0" "$RC" "destroy still runs"
+assert_eq "0" "$(grep -c "^tofu plan" "$TMP/tofu.log" || true)" "no plan on destroy"
+unset TOFU_STUB_PLAN_JSON
+
 finish_tests

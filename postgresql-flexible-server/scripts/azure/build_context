@@ -127,6 +127,18 @@ if [[ ! "$POSTGRES_VERSION" =~ ^(16|17)$ ]]; then
   exit 1
 fi
 
+# A major version can only go up. azurerm forces a NEW server for a lower
+# version, which destroys the server and every database in it: refuse it here
+# with a clear message. do_tofu repeats the check on the plan itself, since
+# this one only sees what the notification carries as the current version.
+CURRENT_VERSION=$(echo "$CONTEXT" | jq -r '.service.attributes.postgres_version // ""')
+if [ "$SERVICE_WRITE" = "true" ] && [[ "$CURRENT_VERSION" =~ ^[0-9]+$ ]] \
+  && [ "$POSTGRES_VERSION" -lt "$CURRENT_VERSION" ]; then
+  echo "ERROR: postgres_version cannot go down from ${CURRENT_VERSION} to ${POSTGRES_VERSION}" >&2
+  echo "       A major version upgrade is irreversible; a lower version would recreate the server and lose its data." >&2
+  exit 1
+fi
+
 if [[ ! "$SKU_NAME" =~ ^(B|GP|MO)_Standard_[A-Za-z0-9_]+$ ]]; then
   echo "ERROR: invalid sku_name '${SKU_NAME}' (expected B_Standard_B1ms, GP_Standard_D2s_v3, ...)" >&2
   exit 1
