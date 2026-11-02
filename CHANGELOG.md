@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.4](https://github.com/nullplatform/services-postgresql-flexible-server/compare/v1.1.3...v1.1.4) (2026-11-02)
+
+
+### Bug Fixes
+
+* **deps:** bump nullplatform/scopes/worker-bridge from 2.0.6 to 2.0.7 ([#26](https://github.com/nullplatform/services-postgresql-flexible-server/issues/26)) ([74bddca](https://github.com/nullplatform/services-postgresql-flexible-server/commit/74bddcaf8a65293f246aa5250c1abbb9f232f556))
+
 ## [1.1.3](https://github.com/nullplatform/services-postgresql-flexible-server/compare/v1.1.2...v1.1.3) (2026-10-26)
 
 
