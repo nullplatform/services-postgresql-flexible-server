@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.5](https://github.com/nullplatform/services-postgresql-flexible-server/compare/v1.1.4...v1.1.5) (2026-11-02)
+
+
+### Bug Fixes
+
+* **deps:** update dependency opentofu/opentofu to v1.13.2 ([#28](https://github.com/nullplatform/services-postgresql-flexible-server/issues/28)) ([ff66d97](https://github.com/nullplatform/services-postgresql-flexible-server/commit/ff66d97d588415db928ec0cd3285e660bbea366f))
+
 ## [1.1.4](https://github.com/nullplatform/services-postgresql-flexible-server/compare/v1.1.3...v1.1.4) (2026-11-02)
 
 
