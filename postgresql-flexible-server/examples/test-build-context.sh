@@ -219,6 +219,36 @@ assert_contains "$(get "$ENV_OUT" TOFU_PROTECTED_TYPES)" "azurerm_postgresql_fle
 echo "== database_name is required on create =="
 reject '{"database_name":""}' "empty database_name rejected on create"
 
+echo "== delete after a failed create: a placeholder keeps tofu destroy past the database_name validation =="
+# action_context <type> <attributes JSON> — build_context's environment for a
+# service action whose create never stored database_name.
+action_context() {
+  (
+    export PATH="$SCRIPT_DIR/stub-bin:$PATH" AZ_STUB_LOG="$TMP/az-del.log" NP_STUB_LOG="$TMP/np-del.log"
+    CONTEXT=$(jq --arg t "$1" --argjson a "$2" '.notification
+      | .type = $t | .parameters = {} | .service.attributes = $a' "$SCRIPT_DIR/create.json")
+    export CONTEXT LINK=null SERVICE_PATH VALUES="$TMP/values.yaml" ACTION_SOURCE=service
+    # shellcheck source=/dev/null
+    source "$SERVICE_PATH/scripts/azure/build_context" >/dev/null 2>&1
+    printf 'DATABASE_NAME=%s\n' "$DATABASE_NAME"
+    printf 'TOFU_VARIABLES=%s\n' "$TOFU_VARIABLES"
+  )
+}
+# The regex in deployment/variables.tf's database_name validation block.
+DB_REGEX=$(sed -n '/variable "database_name"/,/^}/p' "$SERVICE_PATH/deployment/variables.tf" \
+  | sed -n 's/.*regex("\(.*\)", var.*/\1/p' | head -1)
+assert_eq "^[a-z][a-z0-9_]{0,62}\$" "$DB_REGEX" "read the module's database_name regex"
+for action in delete read; do
+  BARE=$(action_context "$action" '{}') && RC=0 || RC=$?
+  assert_eq "0" "$RC" "$action with no database_name succeeds"
+  BARE_DB=$(get "$BARE" TOFU_VARIABLES | jq -r '.database_name')
+  assert_eq "match" "$(printf '%s' "$BARE_DB" | grep -Eq "$DB_REGEX" && echo match || echo "no match: '$BARE_DB'")" \
+    "$action: tfvars database_name passes the module's validation"
+  assert_eq "" "$(get "$BARE" DATABASE_NAME)" "$action: the exported DATABASE_NAME stays empty, the placeholder lives in the tfvars only"
+done
+STORED=$(action_context delete '{"database_name":"conciliation"}')
+assert_eq "conciliation" "$(get "$STORED" TOFU_VARIABLES | jq -r '.database_name')" "a stored database_name wins over the placeholder"
+
 echo "== an invalid allowed_ips entry is rejected before tofu =="
 BAD_IPS_VALUES="$TMP/bad-ips-values.yaml"
 sed 's/^allowed_ips:.*/allowed_ips: "20.1.2.3, not-an-ip"/' "$TMP/values.yaml" > "$BAD_IPS_VALUES"

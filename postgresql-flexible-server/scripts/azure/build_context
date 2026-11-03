@@ -312,12 +312,24 @@ TOFU_INIT_VARIABLES=""
 
 TAGS=$(echo "$CONTEXT" | jq -c '.tags // {} | with_entries(.value |= tostring)')
 
+# --- Placeholder for the actions that do not shape the server -------------
+# A delete or read may legitimately see database_name empty: the create
+# failed before the attributes were written. "tofu destroy" still evaluates
+# every variable validation, and an empty string fails database_name's, which
+# would leave the service stuck in failed. Destroy works from state alone, so
+# a syntactically valid placeholder is enough there; only the tfvars get it,
+# the exported DATABASE_NAME stays real.
+TF_DATABASE_NAME="$DATABASE_NAME"
+if [ "$SERVICE_WRITE" != "true" ] && [ -z "$TF_DATABASE_NAME" ]; then
+  TF_DATABASE_NAME="np_unset"
+fi
+
 TOFU_VARIABLES=$(jq -nc \
   --arg     service_id            "$SERVICE_ID" \
   --arg     server_name           "$SERVER_NAME" \
   --arg     resource_group_name   "$RESOURCE_GROUP_NAME" \
   --arg     location              "$LOCATION" \
-  --arg     database_name         "$DATABASE_NAME" \
+  --arg     database_name         "$TF_DATABASE_NAME" \
   --arg     postgres_version      "$POSTGRES_VERSION" \
   --arg     sku_name              "$SKU_NAME" \
   --argjson storage_mb            "$STORAGE_MB" \
