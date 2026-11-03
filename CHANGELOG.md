@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/nullplatform/services-postgresql-flexible-server/compare/v1.1.5...v1.2.0) (2026-11-03)
+
+
+### Features
+
+* allow in-place postgres major upgrade on update ([d3be5ee](https://github.com/nullplatform/services-postgresql-flexible-server/commit/d3be5eede78f4118faa8c2990fcc450088e83524))
+
 ## [1.1.5](https://github.com/nullplatform/services-postgresql-flexible-server/compare/v1.1.4...v1.1.5) (2026-11-02)
 
 
