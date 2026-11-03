@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.1](https://github.com/nullplatform/services-postgresql-flexible-server/compare/v1.2.0...v1.2.1) (2026-11-03)
+
+
+### Bug Fixes
+
+* **delete:** pass a valid database_name placeholder when the create never stored it ([87be609](https://github.com/nullplatform/services-postgresql-flexible-server/commit/87be609a4228272a28f2c9e6698e7f824f3ce72d))
+* **delete:** pass a valid database_name placeholder when the create never stored it ([5899978](https://github.com/nullplatform/services-postgresql-flexible-server/commit/5899978cc0a94c3cc395346fb2e7b97d9a4f65fc))
+
 ## [1.2.0](https://github.com/nullplatform/services-postgresql-flexible-server/compare/v1.1.5...v1.2.0) (2026-11-03)
 
 
