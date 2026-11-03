@@ -4,8 +4,9 @@ terraform {
   required_providers {
     azurerm = {
       source = "hashicorp/azurerm"
-      # 4.13+ accepts version "17" on azurerm_postgresql_flexible_server.
-      version = "~> 4.30"
+      # 4.46+ accepts version "17" on azurerm_postgresql_flexible_server, and
+      # 4.27+ forces a new server on a lower version (do_tofu refuses that plan).
+      version = "~> 4.46"
     }
     random = {
       source  = "hashicorp/random"

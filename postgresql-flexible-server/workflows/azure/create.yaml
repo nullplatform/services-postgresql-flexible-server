@@ -47,6 +47,8 @@ steps:
         type: environment
       - name: TFSTATE_KEY
         type: environment
+      - name: TOFU_PROTECTED_TYPES
+        type: environment
 
   - name: tofu
     type: script

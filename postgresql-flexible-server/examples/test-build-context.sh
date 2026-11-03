@@ -42,7 +42,7 @@ load_context() {
     for v in SERVICE_ID SERVICE_NAME SERVER_NAME DATABASE_NAME RESOURCE_GROUP_NAME LOCATION ALLOWED_IPS \
              TFSTATE_STORAGE_ACCOUNT TFSTATE_RESOURCE_GROUP TFSTATE_CONTAINER TFSTATE_KEY \
              OUTPUT_DIR TOFU_MODULE_DIR TOFU_INIT_VARIABLES TOFU_VARIABLES \
-             LINK_ID LINK_USERNAME LINK_ACCESS_LEVEL; do
+             LINK_ID LINK_USERNAME LINK_ACCESS_LEVEL TOFU_PROTECTED_TYPES; do
       printf '%s=%s\n' "$v" "${!v:-}"
     done
   )
@@ -107,14 +107,14 @@ MERGED=$(
   export PATH="$SCRIPT_DIR/stub-bin:$PATH" AZ_STUB_LOG="$TMP/az2.log" NP_STUB_LOG="$TMP/np2.log"
   CONTEXT=$(jq '.notification
     | .service.attributes = {"database_name":"conciliation","sku_name":"GP_Standard_D2s_v3","backup_retention_days":35}
-    | .parameters = {"sku_name":"B_Standard_B2s"}' "$SCRIPT_DIR/create.json")
+    | .parameters = {"sku_name":"GP_Standard_D4s_v3"}' "$SCRIPT_DIR/create.json")
   export CONTEXT
   export LINK=null SERVICE_PATH VALUES="$TMP/values.yaml" ACTION_SOURCE=service
   # shellcheck source=/dev/null
   source "$SERVICE_PATH/scripts/azure/build_context" >/dev/null 2>&1
   printf '%s' "$TOFU_VARIABLES"
 )
-assert_eq "B_Standard_B2s" "$(printf '%s' "$MERGED" | jq -r '.sku_name')" "parameter beats stored attribute"
+assert_eq "GP_Standard_D4s_v3" "$(printf '%s' "$MERGED" | jq -r '.sku_name')" "parameter beats stored attribute"
 assert_eq "35" "$(printf '%s' "$MERGED" | jq -r '.backup_retention_days')" "stored attribute used when no parameter"
 
 echo "== a stored server_name is stable and wins over a changed .service.name =="
@@ -154,6 +154,67 @@ reject '{"storage_mb":"; rm -rf /"}'               "non-numeric storage_mb rejec
 reject '{"storage_mb":1024}'                       "storage_mb below the Azure minimum rejected"
 reject '{"backup_retention_days":99}'              "out-of-range backup_retention_days rejected"
 reject '{"high_availability":"maybe"}'             "non-boolean high_availability rejected"
+
+echo "== postgres_version can go up on update, never down =="
+# update_version <current> <requested> — runs build_context for an update and
+# prints the postgres_version it hands to tofu; fails when build_context does.
+update_version() {
+  (
+    export PATH="$SCRIPT_DIR/stub-bin:$PATH" AZ_STUB_LOG="$TMP/az-upg.log" NP_STUB_LOG="$TMP/np-upg.log"
+    CONTEXT=$(jq --arg cur "$1" --arg new "$2" '.notification
+      | .type = "update" | .action = "service:action:update"
+      | .service.attributes = {"database_name":"conciliation","server_name":"conciliation-db-9f8e7d6c","postgres_version":$cur,"sku_name":"GP_Standard_D2s_v3"}
+      | .parameters = {"postgres_version":$new}' "$SCRIPT_DIR/create.json")
+    export CONTEXT LINK=null SERVICE_PATH VALUES="$TMP/values.yaml" ACTION_SOURCE=service
+    # shellcheck source=/dev/null
+    source "$SERVICE_PATH/scripts/azure/build_context" >/dev/null 2>&1
+    printf '%s' "$TOFU_VARIABLES" | jq -r '.postgres_version'
+  )
+}
+assert_eq "17" "$(update_version 16 17 || echo failed)" "16 -> 17 is passed to tofu"
+assert_eq "17" "$(update_version 17 17 || echo failed)" "an update that keeps 17 passes"
+DOWN_ERR=$(
+  export PATH="$SCRIPT_DIR/stub-bin:$PATH" AZ_STUB_LOG="$TMP/az-down.log" NP_STUB_LOG="$TMP/np-down.log"
+  CONTEXT=$(jq '.notification
+    | .type = "update"
+    | .service.attributes = {"database_name":"conciliation","postgres_version":"17"}
+    | .parameters = {"postgres_version":"16"}' "$SCRIPT_DIR/create.json")
+  export CONTEXT LINK=null SERVICE_PATH VALUES="$TMP/values.yaml" ACTION_SOURCE=service
+  # shellcheck source=/dev/null
+  source "$SERVICE_PATH/scripts/azure/build_context" 2>&1
+) && DOWN_RC=0 || DOWN_RC=$?
+assert_eq "1" "$DOWN_RC" "17 -> 16 is refused before tofu"
+assert_contains "$DOWN_ERR" "cannot go down from 17 to 16" "error names both versions"
+
+# update_with <stored attributes JSON> <parameters JSON> — runs build_context
+# for an update; prints its stderr and fails when build_context does.
+update_with() {
+  (
+    export PATH="$SCRIPT_DIR/stub-bin:$PATH" AZ_STUB_LOG="$TMP/az-mix.log" NP_STUB_LOG="$TMP/np-mix.log"
+    CONTEXT=$(jq --argjson s "$1" --argjson p "$2" '.notification
+      | .type = "update" | .service.attributes = $s | .parameters = $p' "$SCRIPT_DIR/create.json")
+    export CONTEXT LINK=null SERVICE_PATH VALUES="$TMP/values.yaml" ACTION_SOURCE=service
+    # shellcheck source=/dev/null
+    source "$SERVICE_PATH/scripts/azure/build_context" 2>&1 >/dev/null
+  )
+}
+STORED='{"database_name":"conciliation","postgres_version":"16","sku_name":"GP_Standard_D2s_v3","storage_mb":32768,"backup_retention_days":7,"high_availability":false}'
+
+echo "== a version upgrade runs on its own update =="
+MIX_ERR=$(update_with "$STORED" "$(echo "$STORED" | jq -c '.postgres_version = "17" | .sku_name = "GP_Standard_D4s_v3"')") && MIX_RC=0 || MIX_RC=$?
+assert_eq "1" "$MIX_RC" "version + SKU in one update is refused"
+assert_contains "$MIX_ERR" "together with: sku_name" "error names the other attribute"
+update_with "$STORED" "$(echo "$STORED" | jq -c '.postgres_version = "17"')" >/dev/null && ALONE_RC=0 || ALONE_RC=$?
+assert_eq "0" "$ALONE_RC" "version alone, other attributes unchanged, passes"
+update_with "$STORED" "$(echo "$STORED" | jq -c '.sku_name = "GP_Standard_D4s_v3"')" >/dev/null && SKU_RC=0 || SKU_RC=$?
+assert_eq "0" "$SKU_RC" "SKU alone, same version, passes"
+
+echo "== no stored version on update leaves a WARN =="
+WARN_OUT=$(update_with '{"database_name":"conciliation"}' '{"database_name":"conciliation","postgres_version":"17"}') || true
+assert_contains "$WARN_OUT" "WARN: no numeric postgres_version stored" "the skipped check is logged"
+
+echo "== protected types are exported for service actions =="
+assert_contains "$(get "$ENV_OUT" TOFU_PROTECTED_TYPES)" "azurerm_postgresql_flexible_server" "service create protects the server"
 
 echo "== database_name is required on create =="
 reject '{"database_name":""}' "empty database_name rejected on create"
@@ -217,6 +278,7 @@ LINK_ENV=$(load_context "$SCRIPT_DIR/link.json")
 assert_eq "eeeeeeee-1111-2222-3333-444444444444" "$(get "$LINK_ENV" LINK_ID)" "LINK_ID parsed"
 assert_eq "u_conciliation_api_eeeeeeee" "$(get "$LINK_ENV" LINK_USERNAME)" "username derived from the app slug and the link id"
 assert_eq "admin" "$(get "$LINK_ENV" LINK_ACCESS_LEVEL)" "access level from link parameters"
+assert_eq "" "$(get "$LINK_ENV" TOFU_PROTECTED_TYPES)" "link actions keep do_tofu's plain apply"
 
 echo "== a stored username wins over a recomputed one =="
 STORED_USER=$(
