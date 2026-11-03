@@ -220,13 +220,14 @@ echo "== database_name is required on create =="
 reject '{"database_name":""}' "empty database_name rejected on create"
 
 echo "== delete after a failed create: a placeholder keeps tofu destroy past the database_name validation =="
-# action_context <type> <attributes JSON> — build_context's environment for a
-# service action whose create never stored database_name.
+# action_context <type> <slug> <attributes JSON> — build_context's environment
+# for a service action whose create never stored database_name. A read
+# arrives as type=custom with slug=read, like every custom action.
 action_context() {
   (
     export PATH="$SCRIPT_DIR/stub-bin:$PATH" AZ_STUB_LOG="$TMP/az-del.log" NP_STUB_LOG="$TMP/np-del.log"
-    CONTEXT=$(jq --arg t "$1" --argjson a "$2" '.notification
-      | .type = $t | .parameters = {} | .service.attributes = $a' "$SCRIPT_DIR/create.json")
+    CONTEXT=$(jq --arg t "$1" --arg s "$2" --argjson a "$3" '.notification
+      | .type = $t | .slug = $s | .parameters = {} | .service.attributes = $a' "$SCRIPT_DIR/create.json")
     export CONTEXT LINK=null SERVICE_PATH VALUES="$TMP/values.yaml" ACTION_SOURCE=service
     # shellcheck source=/dev/null
     source "$SERVICE_PATH/scripts/azure/build_context" >/dev/null 2>&1
@@ -238,15 +239,16 @@ action_context() {
 DB_REGEX=$(sed -n '/variable "database_name"/,/^}/p' "$SERVICE_PATH/deployment/variables.tf" \
   | sed -n 's/.*regex("\(.*\)", var.*/\1/p' | head -1)
 assert_eq "^[a-z][a-z0-9_]{0,62}\$" "$DB_REGEX" "read the module's database_name regex"
-for action in delete read; do
-  BARE=$(action_context "$action" '{}') && RC=0 || RC=$?
+for action in delete:delete custom:read; do
+  BARE=$(action_context "${action%%:*}" "${action#*:}" '{}') && RC=0 || RC=$?
+  action="${action#*:}"
   assert_eq "0" "$RC" "$action with no database_name succeeds"
   BARE_DB=$(get "$BARE" TOFU_VARIABLES | jq -r '.database_name')
   assert_eq "match" "$(printf '%s' "$BARE_DB" | grep -Eq "$DB_REGEX" && echo match || echo "no match: '$BARE_DB'")" \
     "$action: tfvars database_name passes the module's validation"
   assert_eq "" "$(get "$BARE" DATABASE_NAME)" "$action: the exported DATABASE_NAME stays empty, the placeholder lives in the tfvars only"
 done
-STORED=$(action_context delete '{"database_name":"conciliation"}')
+STORED=$(action_context delete delete '{"database_name":"conciliation"}')
 assert_eq "conciliation" "$(get "$STORED" TOFU_VARIABLES | jq -r '.database_name')" "a stored database_name wins over the placeholder"
 
 echo "== an invalid allowed_ips entry is rejected before tofu =="
