@@ -37,8 +37,8 @@ the OpenTofu execution and the state layout are the same code.
 ├── postgresql-flexible-server/
 │   ├── specs/
 │   │   ├── service-spec.json.tpl   # Service schema (attributes the user sees)
-│   │   ├── links/connect.json.tpl  # Link schema (access level, credentials)
-│   │   └── install/azure/          # OpenTofu: standalone registration module
+│   │   └── links/connect.json.tpl  # Link schema (access level, credentials)
+│   ├── publish/                    # publishes the service as a package (release workflow only)
 │   ├── deployment/                 # OpenTofu module: server, database, firewall
 │   ├── permissions/                # OpenTofu module: role + grants (per link)
 │   ├── workflows/azure/            # Workflow YAMLs (create/update/delete/link/link-update/unlink/read)
@@ -140,7 +140,7 @@ links to two servers would both try to export `DATABASE_URL`.
 - An agent with worker orchestration enabled, and this service's package slug
   listed in the agent module's `worker_orchestrated_packages`
 - The agent's worker needs the Azure environment (`ARM_*` or `AZURE_*`,
-  `RESOURCE_GROUP`, `AZURE_TFSTATE_*`); see "How to register" below
+  `RESOURCE_GROUP`, `AZURE_TFSTATE_*`); see [Install in your organization](#install-in-your-organization) below
 - A Storage Account with an **existing** blob container for OpenTofu state.
   This service never creates one: it writes a per-service key into a container
   that already exists
@@ -190,20 +190,29 @@ Credentials follow the same tiers through the provider's `.authentication`
 block and the `ARM_*` / `AZURE_*` variables; nothing anywhere means the
 agent's own identity.
 
-## How to register this service in nullplatform
+## Install in your organization
 
-Three pieces, in three layers.
+The service is published once as the package `np-azure-postgresql-flexible-server` (specification "Azure PostgreSQL Flexible Server"), visible to every organization. You do not copy its specs: you install the package and use it read-only.
 
-**1 — The agent** must be able to run the worker and give it the Azure
-environment. In the [`nullplatform/agent`](https://github.com/nullplatform/tofu-modules/tree/main/nullplatform/agent)
-module:
+How installing a package works, how it coexists with a copy you registered, how to upgrade, and when to fork instead are in the [package installation guide](https://docs.nullplatform.com/docs/packages/install); this section has what is specific to this service.
+
+Installing it touches two layers: the agent, which runs the worker with the Azure environment, and the nullplatform layer. There is no infrastructure module: grant the roles in [Requirements](#requirements) directly.
+
+| Layer | What | Module |
+|---|---|---|
+| agent (Helm) | The package in `worker_orchestrated_packages`, and the Azure environment its worker reads | tofu-modules' [`nullplatform/agent`](https://github.com/nullplatform/tofu-modules/tree/main/nullplatform/agent) |
+| nullplatform (nullplatform API key) | The installation of the package and the agent channel | tofu-modules' `service_package_installation` |
+
+Pick ONE release of this repository (the latest is on its [releases page](https://github.com/nullplatform/services-postgresql-flexible-server/releases)) and install its version.
 
 ```hcl
-  worker_orchestrated_packages = ["azure-postgresql-flexible-server"]
+# ── agent ────────────────────────────────────────────────────────────
+# In tofu-modules' nullplatform/agent:
+  worker_orchestrated_packages = ["np-azure-postgresql-flexible-server"]
 
   worker = {
     patches = [{
-      target = { package = "azure-postgresql-flexible-server" }
+      target = { package = "np-azure-postgresql-flexible-server" }
       merge = {
         spec = {
           containers = [{
@@ -221,6 +230,21 @@ module:
     AZURE_TFSTATE_RESOURCE_GROUP  = "<tfstate resource group>"
     SERVICES_PG_ALLOWED_IPS       = "<cluster egress ip>"
   }
+
+# ── nullplatform layer ───────────────────────────────────────────────
+# The same module a catalog entry with `install_package` becomes. For a
+# service the installation is the whole nullplatform side, channel included.
+module "postgresql_flexible_server" {
+  source = "git::https://github.com/nullplatform/tofu-modules.git//nullplatform/service_package_installation?ref=v9.16.0"
+
+  nrn                  = var.nrn
+  package_slug         = "np-azure-postgresql-flexible-server"
+  package_version      = "X.Y.Z" # the same release, without the v
+  agent_tags_selectors = { cluster = "runtime" } # must match the agent's TAGS
+}
+# Keeping channels in a separate bindings layer instead? Use
+# nullplatform/package_installation here and service_definition_agent_association
+# there, with package_slug = "np-azure-postgresql-flexible-server".
 ```
 
 The `envFrom` is required. The module injects the Azure environment only into
@@ -228,54 +252,13 @@ the `containers` package's worker, so any other package's worker starts with
 none of it. `extra_envs` land in the agent's Helm secret, which the patch
 mounts.
 
-**2 — The service specification**, with the worker image pinned:
+To upgrade, move `package_version` to the new release. See tofu-modules' [`service_package_installation`](https://github.com/nullplatform/tofu-modules/tree/main/nullplatform/service_package_installation) for its inputs and outputs.
 
-```hcl
-module "service_definition_postgresql_flexible_server" {
-  source              = "git::https://github.com/nullplatform/tofu-modules.git//nullplatform/service_definition?ref=v8.0.0"
-  nrn                 = var.nrn
-  service_path        = "postgresql-flexible-server"
-  service_name        = "Azure PostgreSQL Flexible Server"
-  repository_name     = "services-postgresql-flexible-server"
-  repository_branch   = "<tag>"
-  repository_ref_type = "tags"
-  available_links     = ["connect"]
+Prerequisites: an agent whose `TAGS` match the channel's `tags_selectors` and with `public.ecr.aws/nullplatform/*` in `worker.allowedRegistries`; the rest is in [Requirements](#requirements).
 
-  package = {
-    version = "<semver>"
-    artifacts = [{
-      name   = "worker-image"
-      type   = "oci_image"
-      lookup = true
-      meta = {
-        registry   = "public.ecr.aws"
-        repository = "nullplatform/agent-plugins/services/postgresql-flexible-server"
-        tag        = "<tag>"
-      }
-    }]
-  }
-}
-```
+## How the package is published
 
-**3 — The channel association**, routing the action to the worker:
-
-```hcl
-module "service_agent_association_postgresql_flexible_server" {
-  source                     = "git::https://github.com/nullplatform/tofu-modules.git//nullplatform/service_definition_agent_association?ref=v8.0.0"
-  nrn                        = var.nrn
-  api_key                    = var.np_api_key
-  service_path               = "postgresql-flexible-server"
-  service_specification_slug = module.service_definition_postgresql_flexible_server.service_specification_slug
-  tags_selectors             = var.tags_selectors
-
-  worker_orchestrator = true
-  package_slug        = module.service_definition_postgresql_flexible_server.service_specification_slug
-}
-```
-
-A ready-made version of pieces 2 and 3 lives in
-[`postgresql-flexible-server/specs/install/azure/`](postgresql-flexible-server/specs/install/azure)
-for a standalone install.
+Every release publishes a new revision of the package from this repository, in the same run that pushes the worker image ([`.github/workflows/release.yml`](./.github/workflows/release.yml)): the `publish-package` job applies [`postgresql-flexible-server/publish`](./postgresql-flexible-server/publish), a stack on tofu-modules' `service_package_publish`, which pins this tag's specs and the image by digest. The package version is the release tag, as for the image.
 
 ## Important considerations
 
@@ -380,6 +363,7 @@ After adding the **Public ECR** service to the application, set in this reposito
 |---|---|---|
 | `AWS_ROLE_ARN_ECR_PUSH` | secret | the publisher role ARN the Public ECR service returns |
 | `NP_ARTIFACT_NRN` | variable | `organization=4` |
+| `PACKAGE_STATE_AWS_ACCOUNT_ID`, `PACKAGE_TFSTATE_BUCKET`, `PACKAGE_TFSTATE_REGION` | organization secrets | where the publish stack keeps its state; the state role is `github-actions-<repository>-package-state` in that account, by convention |
 
 `ARTIFACT_NP_API_KEY` comes from the organization. The release checks all
 three before building and fails with a clear error if one is missing.

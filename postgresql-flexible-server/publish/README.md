@@ -1,0 +1,3 @@
+# postgresql-flexible-server publish
+
+OpenTofu stack that publishes this service as the package `np-azure-postgresql-flexible-server`, visible to every organization. Only the release workflow runs it, through the shared [`publish-package`](https://github.com/nullplatform/actions-nullplatform#publish-package) workflow that [`release.yml`](../../.github/workflows/release.yml) enables with `package_stack_dir`. What a release publishes, how it is versioned and which secrets the workflow needs are documented in tofu-modules' [`service_package_publish`](https://github.com/nullplatform/tofu-modules/tree/main/nullplatform/service_package_publish), which this stack calls with the values that name the service.
