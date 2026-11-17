@@ -196,6 +196,8 @@ The service is published once as the package `np-azure-postgresql-flexible-serve
 
 How installing a package works, how it coexists with a copy you registered, how to upgrade, and when to fork instead are in the [package installation guide](https://docs.nullplatform.com/docs/packages/install); this section has what is specific to this service.
 
+Already registered a copy from the former `postgresql-flexible-server/specs/install`? It keeps working: it called tofu-modules' `service_definition` on specs that stay in every release, and the package installs next to it, as the guide explains. If you sourced that directory as a module, pin its `?ref` to a release that still has it.
+
 Installing it touches two layers: the agent, which runs the worker with the Azure environment, and the nullplatform layer. There is no infrastructure module: grant the roles in [Requirements](#requirements) directly.
 
 | Layer | What | Module |
