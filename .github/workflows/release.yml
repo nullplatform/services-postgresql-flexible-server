@@ -58,6 +58,16 @@ jobs:
       # latest always points at the last release; pull requests publish pr-<number> instead.
       also_tag_latest: true
       existing_tag: ${{ inputs.existing_tag || '' }}
+      # Publishes the service as a global package from this release's specs and
+      # image (postgresql-flexible-server/publish). The state role is github-actions-<repository>-package-state,
+      # by convention; AWS_ROLE_ARN_PACKAGE_STATE overrides it for a fork and is not
+      # set here.
+      package_stack_dir: postgresql-flexible-server/publish
     secrets:
       aws_role_arn: ${{ secrets.AWS_ROLE_ARN_ECR_PUSH }}
       artifact_np_api_key: ${{ secrets.ARTIFACT_NP_API_KEY }}
+      package_np_api_key: ${{ secrets.ARTIFACT_NP_API_KEY }}
+      package_state_aws_account_id: ${{ secrets.PACKAGE_STATE_AWS_ACCOUNT_ID }}
+      package_state_role_arn: ${{ secrets.AWS_ROLE_ARN_PACKAGE_STATE }}
+      package_state_bucket: ${{ secrets.PACKAGE_TFSTATE_BUCKET }}
+      package_state_region: ${{ secrets.PACKAGE_TFSTATE_REGION }}
