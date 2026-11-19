@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.0](https://github.com/nullplatform/services-postgresql-flexible-server/compare/v1.2.2...v1.3.0) (2026-11-19)
+
+
+### Features
+
+* **package:** publish the service as a global package ([2d4b883](https://github.com/nullplatform/services-postgresql-flexible-server/commit/2d4b88324735bdc070db1ba913d027f77509dc45))
+* **package:** publish the service as a global package ([b40a920](https://github.com/nullplatform/services-postgresql-flexible-server/commit/b40a9209a75b081d98d5129b36df402fd58dea0f))
+
 ## [1.2.2](https://github.com/nullplatform/services-postgresql-flexible-server/compare/v1.2.1...v1.2.2) (2026-11-16)
 
 
